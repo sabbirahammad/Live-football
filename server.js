@@ -8,6 +8,7 @@ import morgan from 'morgan';
 import connectDB from './db.js';
 import admin from 'firebase-admin';
 import fs from 'fs';
+import path from 'path';
 import cron from 'node-cron';
 import User from './models/User.js';
 import authRoutes from './routes/authRoutes.js';
@@ -17,6 +18,7 @@ import teamRoutes from './routes/teamRoutes.js';
 import roomRoutes from './routes/roomRoutes.js';
 import leaderboardRoutes from './routes/leaderboardRoutes.js';
 import { fetchAndSaveLiveMatches } from './services/liveMatchService.js';
+import { fileURLToPath } from 'url';
 
 
 // Environment variables লোড করা
@@ -26,10 +28,20 @@ dotenv.config();
 connectDB();
 
 // Firebase Admin ইনিশিয়ালাইজ করা হচ্ছে
-const serviceAccount = JSON.parse(fs.readFileSync('./firebase-admin-sdk.json', 'utf-8'));
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
-});
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const firebaseConfigPath = process.env.FIREBASE_ADMIN_SDK_PATH
+  ? path.resolve(process.env.FIREBASE_ADMIN_SDK_PATH)
+  : path.join(__dirname, 'firebase-admin-sdk.json');
+
+if (fs.existsSync(firebaseConfigPath)) {
+  const serviceAccount = JSON.parse(fs.readFileSync(firebaseConfigPath, 'utf-8'));
+  admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount)
+  });
+} else {
+  console.log(`Firebase Admin disabled: service account file not found at ${firebaseConfigPath}`);
+}
 
 const app = express();
 

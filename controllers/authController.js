@@ -3,7 +3,6 @@ import Room from '../models/Room.js';
 import FantasyTeam from '../models/FantasyTeam.js';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
-import admin from 'firebase-admin';
 import mongoose from 'mongoose';
 
 const signToken = (id) =>
