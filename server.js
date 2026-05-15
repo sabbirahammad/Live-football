@@ -8,7 +8,6 @@ import morgan from 'morgan';
 import connectDB from './db.js';
 import admin from 'firebase-admin';
 import fs from 'fs';
-import path from 'path';
 import cron from 'node-cron';
 import User from './models/User.js';
 import authRoutes from './routes/authRoutes.js';
@@ -18,7 +17,6 @@ import teamRoutes from './routes/teamRoutes.js';
 import roomRoutes from './routes/roomRoutes.js';
 import leaderboardRoutes from './routes/leaderboardRoutes.js';
 import { fetchAndSaveLiveMatches } from './services/liveMatchService.js';
-import { fileURLToPath } from 'url';
 
 
 // Environment variables লোড করা
@@ -28,20 +26,10 @@ dotenv.config();
 connectDB();
 
 // Firebase Admin ইনিশিয়ালাইজ করা হচ্ছে
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const firebaseConfigPath = process.env.FIREBASE_ADMIN_SDK_PATH
-  ? path.resolve(process.env.FIREBASE_ADMIN_SDK_PATH)
-  : path.join(__dirname, 'firebase-admin-sdk.json');
-
-if (fs.existsSync(firebaseConfigPath)) {
-  const serviceAccount = JSON.parse(fs.readFileSync(firebaseConfigPath, 'utf-8'));
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount)
-  });
-} else {
-  console.log(`Firebase Admin disabled: service account file not found at ${firebaseConfigPath}`);
-}
+const serviceAccount = JSON.parse(fs.readFileSync('./firebase-admin-sdk.json', 'utf-8'));
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount)
+});
 
 const app = express();
 
@@ -57,8 +45,8 @@ const io = new Server(server, {
 app.set('io', io);
 
 // Middleware সেটআপ (পারফরম্যান্স এবং সিকিউরিটির জন্য)
-app.use(helmet());           // HTTP security headers
-app.use(cors());             // Cross-Origin Resource Sharing
+app.use(helmet({ crossOriginResourcePolicy: false })); // HTTP security headers (রিলাক্স করা হলো যাতে অ্যাপে ব্লক না হয়)
+app.use(cors({ origin: '*' })); // সব সোর্স থেকে Cross-Origin রিকোয়েস্ট অ্যালাও
 app.use(express.json({ limit: '10mb' })); // বড় সাইজের Base64 Image parse করার জন্য
 app.use(morgan('dev'));      // API Request log দেখার জন্য
 
