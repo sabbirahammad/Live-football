@@ -267,17 +267,33 @@ export const syncMatchesFromApi = async (io, options = {}) => {
   const apiKey = process.env.FOOTBALL_API_KEY;
   if (!apiKey) throw new Error('FOOTBALL_API_KEY not found in .env');
 
-  const date = options.date || new Date().toISOString().split('T')[0];
-  const response = await fetch(`https://v3.football.api-sports.io/fixtures?date=${date}`, {
-    headers: { 'x-apisports-key': apiKey }
-  });
-  const data = await response.json();
+  const today = new Date();
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
 
-  if (!data.response || data.response.length === 0) {
-    return { synced: 0, finalized: 0, message: 'No matches found for the requested date' };
+  const dates = options.date
+    ? [options.date]
+    : [today, tomorrow].map((d) => d.toISOString().split('T')[0]);
+
+  const responses = await Promise.all(
+    dates.map(async (date) => {
+      const response = await fetch(`https://v3.football.api-sports.io/fixtures?date=${date}`, {
+        headers: { 'x-apisports-key': apiKey }
+      });
+      const data = await response.json();
+      return Array.isArray(data.response) ? data.response : [];
+    })
+  );
+
+  const mergedResponse = responses.flat();
+  if (mergedResponse.length === 0) {
+    return { synced: 0, finalized: 0, message: 'No matches found for the requested dates' };
   }
 
-  const filteredResponse = data.response.filter(item => TOP_LEAGUE_IDS.includes(item.league.id));
+  const dedupedResponse = Array.from(
+    new Map(mergedResponse.map((item) => [item.fixture.id, item])).values()
+  );
+  const filteredResponse = dedupedResponse.filter(item => TOP_LEAGUE_IDS.includes(item.league.id));
   const finishedMatchIds = [];
 
   for (const item of filteredResponse) {

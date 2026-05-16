@@ -159,12 +159,7 @@ const shouldAutoSyncMatches = process.env.ENABLE_MATCH_SYNC !== 'false' && !!pro
 
 if (shouldAutoSyncMatches) {
   setInterval(() => {
-    // চেক করা হচ্ছে অ্যাপে কোনো লাইভ ইউজার কানেক্টেড আছে কি না
-    if (io.engine.clientsCount > 0) {
-      fetchAndSaveLiveMatches(io);
-    } else {
-      console.log('💤 No active users connected. Skipping API fetch to save limit.');
-    }
+    fetchAndSaveLiveMatches(io);
   }, 900000);
 
   fetchAndSaveLiveMatches(io);
@@ -190,3 +185,4 @@ cron.schedule('0 0 * * 0', async () => {
 
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => console.log(`🚀 Server running in ${process.env.NODE_ENV} mode on port ${PORT}`));
+
