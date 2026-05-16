@@ -5,6 +5,7 @@ import Player from '../models/Player.js';
 import FantasyTeam from '../models/FantasyTeam.js';
 import Room from '../models/Room.js';
 import { processAutoSubsAndRewards } from '../controllers/matchController.js';
+import { clearLeaderboardCache } from '../controllers/leaderboardController.js';
 
 const LIVE_SHORT_CODES = ['1H', '2H', 'HT', 'ET', 'P', 'LIVE'];
 const FINISHED_SHORT_CODES = ['FT', 'AET', 'PEN'];
@@ -192,6 +193,7 @@ const applyPointEventToTeams = async (matchId, pointEvent, io) => {
 
   rooms.forEach(room => io?.to(String(room._id)).emit('live_event', roomEvent));
   io?.emit('refresh_global_leaderboard');
+  clearLeaderboardCache(matchId);
   return true;
 };
 

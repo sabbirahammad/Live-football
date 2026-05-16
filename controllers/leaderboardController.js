@@ -4,6 +4,24 @@ import FantasyTeam from '../models/FantasyTeam.js';
 import Room from '../models/Room.js';
 import Match from '../models/Match.js';
 
+// --- In-Memory Cache Setup for Leaderboard ---
+let leaderboardCache = {
+  global: { data: null, lastFetch: 0 },
+  weekly: { data: null, lastFetch: 0 },
+  matches: {} // { matchId: { data: null, lastFetch: 0 } }
+};
+const CACHE_TTL = 10 * 1000; // 10 seconds TTL
+
+export const clearLeaderboardCache = (matchId = null) => {
+  if (matchId && leaderboardCache.matches[matchId]) {
+    leaderboardCache.matches[matchId].lastFetch = 0;
+  } else {
+    leaderboardCache.global.lastFetch = 0;
+    leaderboardCache.weekly.lastFetch = 0;
+    leaderboardCache.matches = {};
+  }
+};
+
 const GLOBAL_SORT = { totalPoints: -1, coinBalance: -1, _id: 1 };
 const WEEKLY_SORT = { weeklyPoints: -1, totalPoints: -1, coinBalance: -1, _id: 1 };
 const MATCH_SORT = { totalPoints: -1, createdAt: 1, _id: 1 };
@@ -93,12 +111,21 @@ export const updateGlobalRanks = async () => {
 // @access  Public
 export const getLeaderboard = async (req, res) => {
   try {
+    const now = Date.now();
+    // ক্যাশে ডেটা থাকলে সরাসরি রিটার্ন করা হবে (1ms রেসপন্স টাইম)
+    if (leaderboardCache.global.data && (now - leaderboardCache.global.lastFetch < CACHE_TTL)) {
+      return res.status(200).json(leaderboardCache.global.data);
+    }
+
     const users = await User.find({ totalPoints: { $gt: 0 } })
       .sort(GLOBAL_SORT)
       .select('name totalPoints globalRank profilePicture coinBalance')
       .limit(50);
 
-    res.status(200).json(mapUserLeaderboard(users, 'totalPoints'));
+    const result = mapUserLeaderboard(users, 'totalPoints');
+    leaderboardCache.global.data = result;
+    leaderboardCache.global.lastFetch = now;
+    res.status(200).json(result);
   } catch (error) {
     res.status(500).json({ message: 'Server error fetching leaderboard', error: error.message });
   }
@@ -112,6 +139,12 @@ export const getMatchLeaderboard = async (req, res) => {
     const { matchId } = req.params;
     const match = await resolveMatchFromParam(matchId);
     if (!match) return res.status(404).json({ message: 'Match not found' });
+
+    const now = Date.now();
+    const stringMatchId = match._id.toString();
+    if (leaderboardCache.matches[stringMatchId]?.data && (now - leaderboardCache.matches[stringMatchId].lastFetch < CACHE_TTL)) {
+      return res.status(200).json(leaderboardCache.matches[stringMatchId].data);
+    }
 
     // ১. এই ম্যাচের সব রুম খুঁজে বের করে সেগুলোতে থাকা টিমের ID গুলো কালেক্ট করা
     const rooms = await Room.find({ match: match._id });
@@ -128,7 +161,9 @@ export const getMatchLeaderboard = async (req, res) => {
       .limit(50)
       .populate('user', 'name profilePicture globalRank');
 
-    res.status(200).json(mapTeamLeaderboard(teams));
+    const result = mapTeamLeaderboard(teams);
+    leaderboardCache.matches[stringMatchId] = { data: result, lastFetch: now };
+    res.status(200).json(result);
   } catch (error) {
     res.status(500).json({ message: 'Server error fetching match leaderboard', error: error.message });
   }
@@ -139,12 +174,20 @@ export const getMatchLeaderboard = async (req, res) => {
 // @access  Public
 export const getWeeklyLeaderboard = async (req, res) => {
   try {
+    const now = Date.now();
+    if (leaderboardCache.weekly.data && (now - leaderboardCache.weekly.lastFetch < CACHE_TTL)) {
+      return res.status(200).json(leaderboardCache.weekly.data);
+    }
+
     const users = await User.find({ weeklyPoints: { $gt: 0 } })
       .sort(WEEKLY_SORT)
       .select('name weeklyPoints totalPoints globalRank profilePicture coinBalance')
       .limit(50);
 
-    res.status(200).json(mapUserLeaderboard(users, 'weeklyPoints'));
+    const result = mapUserLeaderboard(users, 'weeklyPoints');
+    leaderboardCache.weekly.data = result;
+    leaderboardCache.weekly.lastFetch = now;
+    res.status(200).json(result);
   } catch (error) {
     res.status(500).json({ message: 'Server error fetching weekly leaderboard', error: error.message });
   }
@@ -219,6 +262,4 @@ export const getMyLeaderboardStats = async (req, res) => {
       pts: req.user.totalPoints || 0,
     });
   } catch (error) {
-    res.status(500).json({ message: 'Server error fetching your leaderboard stats', error: error.message });
-  }
-};
+    res.status(500).json({ message: 'Server error fetching your leaderboard stats',

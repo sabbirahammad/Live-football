@@ -3,6 +3,7 @@ import FantasyTeam from '../models/FantasyTeam.js';
 import User from '../models/User.js';
 import Player from '../models/Player.js';
 import Room from '../models/Room.js';
+import { clearLeaderboardCache } from './leaderboardController.js';
 
 // --- In-Memory Cache Setup ---
 let matchCache = {
@@ -302,6 +303,7 @@ export const simulateLiveEvent = async (req, res) => {
   
   // ক্যাশ ক্লিয়ার করা যাতে লাইভ ইভেন্টের পর সাথে সাথে নতুন স্কোর পাওয়া যায়
   clearMatchCache();
+  clearLeaderboardCache();
 
   res.status(200).json({ success: true, message: "Live event triggered successfully", event });
 };
@@ -367,6 +369,7 @@ export const syncMatches = async (req, res) => {
         
         // ক্যাশ ক্লিয়ার করা
         clearMatchCache();
+        clearLeaderboardCache();
 
         res.status(200).json({ message: "Top matches synced successfully!", autoSubbed: finishedMatchIds.length });
       } else {
