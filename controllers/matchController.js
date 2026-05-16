@@ -4,10 +4,140 @@ import User from '../models/User.js';
 import Player from '../models/Player.js';
 import Room from '../models/Room.js';
 
+// --- In-Memory Cache Setup ---
+let matchCache = {
+  data: null,
+  lastFetch: 0
+};
+const CACHE_TTL = 15 * 1000; // 15 seconds cache TTL
+export const clearMatchCache = () => {
+  matchCache.lastFetch = 0; // ফোর্স রিলোড করার জন্য
+};
+
+// 📊 ম্যাচ শেষে প্লেয়ারদের ফ্যান্টাসি স্ট্যাটাস (Clean Sheet, Play Time, Position-based goals) আপডেট করা
+const processMatchStatistics = async (matchId, fixtureId) => {
+  const apiKey = process.env.FOOTBALL_API_KEY;
+  if (!apiKey) return;
+
+  try {
+    console.log(`\n📊 Fetching Final Player Statistics from API-Sports for Match: ${matchId}`);
+    const response = await fetch(`https://v3.football.api-sports.io/fixtures/players?fixture=${fixtureId}`, {
+      headers: { 'x-apisports-key': apiKey }
+    });
+    const data = await response.json();
+
+    if (data.response && data.response.length > 0) {
+      const matchPlayers = []; // BPS ট্র্যাক করার জন্য
+
+      for (const teamData of data.response) {
+        for (const p of teamData.players) {
+          const apiId = p.player.id;
+          const stats = p.statistics[0];
+          if (!stats) continue;
+
+          const pos = stats.games.position; // "Attacker", "Midfielder", "Defender", "Goalkeeper"
+          const minutes = stats.games.minutes || 0;
+          const conceded = stats.goals.conceded || 0;
+          const goals = stats.goals.total || 0;
+          const assists = stats.goals.assists || 0;
+          const saves = stats.goalkeepers?.saves || 0;
+          const penSaved = stats.penalty?.saved || 0;
+          const yellow = stats.cards.yellow || 0;
+          const red = stats.cards.red || 0;
+          const penMissed = stats.penalty?.missed || 0;
+          const passAccuracy = stats.passes?.accuracy || 0;
+          const keyPasses = stats.passes?.key || 0;
+          const tackles = stats.tackles?.total || 0;
+          const interceptions = stats.tackles?.interceptions || 0;
+
+          let extraPoints = 0;
+          let bps = 0; // Bonus Points System Score
+
+          // ১. খেলার সময় (Playing Time Points)
+          if (minutes > 0 && minutes < 60) { extraPoints += 1; bps += 3; }
+          else if (minutes >= 60) { extraPoints += 2; bps += 6; }
+
+          // BPS: Goals & Assists
+          if (goals > 0) bps += (goals * (pos === "Attacker" ? 24 : pos === "Midfielder" ? 18 : 12));
+          if (assists > 0) bps += (assists * 9);
+
+          // ২. ক্লিন শিট এবং গোল হজম (Clean Sheet & Goals Conceded)
+          if (pos === "Goalkeeper" || pos === "Defender") {
+            if (minutes >= 60 && conceded === 0) { extraPoints += 4; bps += 12; }
+            if (conceded >= 2) extraPoints -= Math.floor(conceded / 2); // প্রতি ২ গোলের জন্য -১ পয়েন্ট
+            if (conceded > 0) bps -= (conceded * 3); // BPS Deduction for goals conceded
+          } else if (pos === "Midfielder") {
+            if (minutes >= 60 && conceded === 0) extraPoints += 1;
+          }
+
+          // ৩. সেভস এবং পেনাল্টি সেভ (GK Actions)
+          if (pos === "Goalkeeper") {
+            if (saves > 0) { extraPoints += Math.floor(saves / 3); bps += (saves * 2); }
+            if (penSaved > 0) { extraPoints += (5 * penSaved); bps += (penSaved * 15); }
+          }
+
+          // BPS: Cards Deductions
+          if (yellow > 0) bps -= (yellow * 3);
+          if (red > 0) bps -= (red * 9);
+          if (penMissed > 0) bps -= (penMissed * 6); // Penalty miss major deduction
+
+          // BPS: Advanced Stats (Modern Fantasy Standard)
+          if (passAccuracy >= 80) bps += 2;
+          else if (passAccuracy >= 70) bps += 1;
+          if (keyPasses > 0) bps += (keyPasses * 1);
+          if (tackles > 0) bps += (tackles * 2);
+          if (interceptions > 0) bps += (interceptions * 2);
+
+          matchPlayers.push({ apiId, extraPoints, bps });
+        }
+      }
+
+      // 🌟 Bonus Points System (BPS) Allocation 🌟
+      // BPS অনুযায়ী প্লেয়ারদের ডিসেন্ডিং অর্ডারে সাজানো
+      matchPlayers.sort((a, b) => b.bps - a.bps);
+
+      // সেরা ৩ জনকে যথাক্রমে +৩, +২, +১ ফ্যান্টাসি পয়েন্ট দেওয়া
+      if (matchPlayers.length > 0 && matchPlayers[0].bps > 0) matchPlayers[0].extraPoints += 3;
+      if (matchPlayers.length > 1 && matchPlayers[1].bps > 0) matchPlayers[1].extraPoints += 2;
+      if (matchPlayers.length > 2 && matchPlayers[2].bps > 0) matchPlayers[2].extraPoints += 1;
+
+      // ডাটাবেসে প্লেয়ারের পয়েন্ট আপডেট করা
+      for (const mp of matchPlayers) {
+        if (mp.extraPoints !== 0) {
+          const playerDoc = await Player.findOneAndUpdate({ apiId: mp.apiId }, { $inc: { pts: mp.extraPoints } });
+          
+          // এই ম্যাচের টিমেও পয়েন্টগুলো যোগ করা (যাতে টিমের টোটাল পয়েন্ট ঠিক থাকে)
+          if (playerDoc) {
+            const teams = await FantasyTeam.find({ match: matchId, players: playerDoc._id });
+            for (const team of teams) {
+              if (!(team.playerPoints instanceof Map)) {
+                team.playerPoints = new Map(Object.entries(team.playerPoints || {}));
+              }
+              const currentMatchPts = Number(team.playerPoints.get(playerDoc._id.toString()) || 0);
+              team.playerPoints.set(playerDoc._id.toString(), currentMatchPts + mp.extraPoints);
+              team.markModified('playerPoints');
+              await team.save();
+            }
+          }
+        }
+      }
+    }
+    console.log(`✅ FPL Match Statistics & BPS (Top 3 Bonus) applied successfully!`);
+  } catch (error) {
+    console.error(`❌ Error processing match stats for fixture ${fixtureId}:`, error);
+  }
+};
+
 //  অটো-সাব এবং পয়েন্ট ডিস্ট্রিবিউশন লজিক
 export const processAutoSubsAndRewards = async (matchId) => {
   try {
     console.log(`🔄 Processing Auto-Subs for Match: ${matchId}`);
+
+    // অটো-সাব এবং পয়েন্ট ডিস্ট্রিবিউশনের ঠিক আগেই ক্লিন শিট ও অন্যান্য স্ট্যাটস আপডেট করে নেওয়া হচ্ছে
+    const currentMatch = await Match.findById(matchId);
+    if (currentMatch && currentMatch.fixtureId) {
+      await processMatchStatistics(matchId, currentMatch.fixtureId);
+    }
 
     // ১. এই ম্যাচের সব রুম খুঁজে বের করে সেগুলোতে থাকা টিমের ID গুলো কালেক্ট করা
     const rooms = await Room.find({ match: matchId });
@@ -80,7 +210,8 @@ export const processAutoSubsAndRewards = async (matchId) => {
       let totalPoints = 0;
       for (const p of starters) {
         if (!p) continue;
-        let pts = p.pts || 0;
+        // গ্লোবাল পয়েন্ট (p.pts) এর বদলে এই ম্যাচের স্পেসিফিক পয়েন্ট (playerPoints) নিতে হবে
+        let pts = Number(team.playerPoints?.get(p._id.toString()) || 0);
         if (activeCaptainId && p._id.equals(activeCaptainId)) pts *= 2;
         else if (activeViceId && p._id.equals(activeViceId)) pts *= 1.5;
         totalPoints += pts;
@@ -108,11 +239,21 @@ export const processAutoSubsAndRewards = async (matchId) => {
 // @access  Public
 export const getMatches = async (req, res) => {
   try {
+    const now = Date.now();
+    // ক্যাশে ডেটা থাকলে এবং ১৫ সেকেন্ড পার না হলে সরাসরি ক্যাশ থেকে ডেটা রিটার্ন করা হবে (Lightning Fast ⚡)
+    if (matchCache.data && (now - matchCache.lastFetch < CACHE_TTL)) {
+      return res.status(200).json(matchCache.data);
+    }
+
     // Remove old dummy matches without fixtureId from database to prevent polluting
     await Match.deleteMany({ fixtureId: null });
     
     // Get matches from DB (which are synced when users open Team Builder or create rooms)
     const matches = await Match.find({}).sort({ matchTime: 1 });
+
+    // নতুন ডেটা ক্যাশে সেভ করা হচ্ছে
+    matchCache.data = matches;
+    matchCache.lastFetch = now;
 
     res.status(200).json(matches);
   } catch (error) {
@@ -159,6 +300,9 @@ export const simulateLiveEvent = async (req, res) => {
   // গ্লোবাল লিডারবোর্ড রিয়েল-টাইম রিফ্রেশ করার জন্য সিগন্যাল পাঠানো
   io.emit("refresh_global_leaderboard");
   
+  // ক্যাশ ক্লিয়ার করা যাতে লাইভ ইভেন্টের পর সাথে সাথে নতুন স্কোর পাওয়া যায়
+  clearMatchCache();
+
   res.status(200).json({ success: true, message: "Live event triggered successfully", event });
 };
 
@@ -221,6 +365,9 @@ export const syncMatches = async (req, res) => {
           await processAutoSubsAndRewards(mId);
         }
         
+        // ক্যাশ ক্লিয়ার করা
+        clearMatchCache();
+
         res.status(200).json({ message: "Top matches synced successfully!", autoSubbed: finishedMatchIds.length });
       } else {
         res.status(404).json({ message: "No top matches found for today" });

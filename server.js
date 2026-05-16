@@ -159,7 +159,12 @@ const shouldAutoSyncMatches = process.env.ENABLE_MATCH_SYNC !== 'false' && !!pro
 
 if (shouldAutoSyncMatches) {
   setInterval(() => {
-    fetchAndSaveLiveMatches(io);
+    // চেক করা হচ্ছে অ্যাপে কোনো লাইভ ইউজার কানেক্টেড আছে কি না
+    if (io.engine.clientsCount > 0) {
+      fetchAndSaveLiveMatches(io);
+    } else {
+      console.log('💤 No active users connected. Skipping API fetch to save limit.');
+    }
   }, 900000);
 
   fetchAndSaveLiveMatches(io);
