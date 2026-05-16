@@ -47,6 +47,75 @@ const mapTeamLeaderboard = (teams) =>
     pts: team.totalPoints || 0,
   }));
 
+const getCurrentWeekStart = () => {
+  const now = new Date();
+  const start = new Date(now);
+  start.setHours(0, 0, 0, 0);
+  start.setDate(start.getDate() - start.getDay());
+  return start;
+};
+
+const getValidRoomTeamIds = async () => {
+  const rooms = await Room.find({}).select('members.team');
+  const validTeamIds = new Set();
+
+  rooms.forEach((room) => {
+    room.members.forEach((member) => {
+      if (member.team) validTeamIds.add(member.team.toString());
+    });
+  });
+
+  return Array.from(validTeamIds);
+};
+
+const buildUserTotalsFromFinishedTeams = async ({ weeklyOnly = false } = {}) => {
+  const validTeamIds = await getValidRoomTeamIds();
+  if (validTeamIds.length === 0) return [];
+
+  const weekStart = getCurrentWeekStart();
+  const teams = await FantasyTeam.find({
+    _id: { $in: validTeamIds },
+    totalPoints: { $gt: 0 },
+  })
+    .select('user totalPoints awardedPoints match')
+    .populate('user', 'name profilePicture globalRank coinBalance')
+    .populate('match', 'matchTime');
+
+  const totalsMap = new Map();
+
+  teams.forEach((team) => {
+    if (!team.user || !team.match) return;
+    if (weeklyOnly && (!team.match.matchTime || new Date(team.match.matchTime) < weekStart)) return;
+
+    const effectivePoints = Math.max(
+      Number(team.awardedPoints || 0),
+      Number(team.totalPoints || 0)
+    );
+    if (effectivePoints <= 0) return;
+
+    const userId = team.user._id.toString();
+    const existing = totalsMap.get(userId) || {
+      _id: team.user._id,
+      name: team.user.name || 'Unknown User',
+      profilePicture: team.user.profilePicture || '',
+      globalRank: team.user.globalRank || 0,
+      coinBalance: Number(team.user.coinBalance || 0),
+      pts: 0,
+    };
+
+    existing.pts += effectivePoints;
+    totalsMap.set(userId, existing);
+  });
+
+  return Array.from(totalsMap.values())
+    .sort((a, b) => (
+      b.pts - a.pts
+      || b.coinBalance - a.coinBalance
+      || String(a._id).localeCompare(String(b._id))
+    ))
+    .map((user, index) => ({ ...user, rank: index + 1 }));
+};
+
 const getGlobalRankQuery = (user) => ({
   $or: [
     { totalPoints: { $gt: user.totalPoints || 0 } },
