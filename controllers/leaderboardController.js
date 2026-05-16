@@ -255,11 +255,14 @@ export const getMyLeaderboardStats = async (req, res) => {
       });
     }
 
-    const higherUsers = await User.countDocuments(getGlobalRankQuery(req.user));
+    const globalUsers = await buildUserTotalsFromFinishedTeams();
+    const meGlobal = globalUsers.find((user) => String(user._id) === String(req.user._id));
     return res.status(200).json({
       ...basePayload,
-      rank: higherUsers + 1,
-      pts: req.user.totalPoints || 0,
+      rank: meGlobal?.rank || '-',
+      pts: meGlobal?.pts || 0,
     });
   } catch (error) {
-    res.status(500).json({ message: 'Server error fetching your leaderboard stats',
+    res.status(500).json({ message: 'Server error fetching your leaderboard stats', error: error.message });
+  }
+};
