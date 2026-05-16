@@ -6,8 +6,6 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import connectDB from './db.js';
-import admin from 'firebase-admin';
-import fs from 'fs';
 import cron from 'node-cron';
 import User from './models/User.js';
 import authRoutes from './routes/authRoutes.js';
@@ -24,12 +22,6 @@ dotenv.config();
 
 // MongoDB কানেক্ট করা
 connectDB();
-
-// Firebase Admin ইনিশিয়ালাইজ করা হচ্ছে
-const serviceAccount = JSON.parse(fs.readFileSync('./firebase-admin-sdk.json', 'utf-8'));
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
-});
 
 const app = express();
 
