@@ -142,11 +142,15 @@ export const saveTeam = async (req, res) => {
       team.players = players;
       team.captain = captain;
       team.viceCaptain = viceCaptain;
+      team.totalPoints = 0;
+      team.awardedPoints = 0;
+      team.playerPoints = {};
       await team.save();
     } else {
       // না থাকলে নতুন তৈরি হবে
       team = await FantasyTeam.create({
-        user: req.user._id, match: actualMatchId, players, captain, viceCaptain
+        user: req.user._id, match: actualMatchId, players, captain, viceCaptain,
+        totalPoints: 0, awardedPoints: 0, playerPoints: {}
       });
     }
 

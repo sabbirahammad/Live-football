@@ -8,6 +8,7 @@ const matchSchema = new mongoose.Schema({
   fixture: Object,
   score: Object,
   events: Array,
+  processedEventKeys: { type: [String], default: [] },
   lastUpdated: { type: Date, default: Date.now }
 });
 

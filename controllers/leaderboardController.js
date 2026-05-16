@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import User from '../models/User.js';
 import FantasyTeam from '../models/FantasyTeam.js';
 import Room from '../models/Room.js';

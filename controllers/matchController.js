@@ -1,8 +1,55 @@
 import Match from '../models/Match.js';
 import FantasyTeam from '../models/FantasyTeam.js';
 import User from '../models/User.js';
-import Player from '../models/Player.js';
 import Room from '../models/Room.js';
+
+const API_FOOTBALL_BASE_URL = 'https://v3.football.api-sports.io';
+
+const getStoredPlayerPoints = (team, playerId) => {
+  const key = playerId?.toString?.() || String(playerId || '');
+  if (!key) return 0;
+  if (team.playerPoints instanceof Map) return Number(team.playerPoints.get(key) || 0);
+  return Number(team.playerPoints?.[key] || 0);
+};
+
+const setStoredPlayerPoints = (team, playerId, value) => {
+  const key = playerId?.toString?.() || String(playerId || '');
+  if (!key) return;
+  if (!(team.playerPoints instanceof Map)) {
+    team.playerPoints = new Map(Object.entries(team.playerPoints || {}));
+  }
+  team.playerPoints.set(key, Number(value) || 0);
+  team.markModified('playerPoints');
+};
+
+const getApiFootballKey = () => {
+  const apiKey = process.env.FOOTBALL_API_KEY;
+  if (!apiKey) {
+    const error = new Error('FOOTBALL_API_KEY not found in .env');
+    error.statusCode = 400;
+    throw error;
+  }
+  return apiKey;
+};
+
+const apiFootballRequest = async (resource, query = {}) => {
+  const apiKey = getApiFootballKey();
+  const params = new URLSearchParams();
+  Object.entries(query || {}).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') {
+      params.set(key, String(value));
+    }
+  });
+  const url = `${API_FOOTBALL_BASE_URL}/${resource}${params.toString() ? `?${params.toString()}` : ''}`;
+  const response = await fetch(url, {
+    headers: { 'x-apisports-key': apiKey }
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    return { ok: false, status: response.status, data };
+  }
+  return { ok: true, status: response.status, data };
+};
 
 //  অটো-সাব এবং পয়েন্ট ডিস্ট্রিবিউশন লজিক
 export const processAutoSubsAndRewards = async (matchId) => {
@@ -38,7 +85,7 @@ export const processAutoSubsAndRewards = async (matchId) => {
       if (startingGkIndex !== -1 && benchGkIndex !== -1) {
         const startingGK = starters[startingGkIndex];
         const benchGK = bench[benchGkIndex];
-        if ((startingGK.pts || 0) === 0 && (benchGK.pts || 0) > 0) {
+        if (getStoredPlayerPoints(team, startingGK._id) === 0 && getStoredPlayerPoints(team, benchGK._id) > 0) {
           starters[startingGkIndex] = benchGK;
           bench[benchGkIndex] = startingGK; // Swap
           hasChanges = true;
@@ -48,11 +95,11 @@ export const processAutoSubsAndRewards = async (matchId) => {
       // 2. Sub Outfield Players
       for (let i = 0; i < starters.length; i++) {
         const starter = starters[i];
-        if (!starter || starter.pos === 'GK' || (starter.pts || 0) > 0) continue;
+        if (!starter || starter.pos === 'GK' || getStoredPlayerPoints(team, starter._id) > 0) continue;
 
         for (let j = 0; j < bench.length; j++) {
           const sub = bench[j];
-          if (!sub || sub.pos === 'GK' || (sub.pts || 0) === 0) continue;
+          if (!sub || sub.pos === 'GK' || getStoredPlayerPoints(team, sub._id) === 0) continue;
 
           const tempStarters = [...starters];
           tempStarters[i] = sub;
@@ -80,7 +127,7 @@ export const processAutoSubsAndRewards = async (matchId) => {
       let totalPoints = 0;
       for (const p of starters) {
         if (!p) continue;
-        let pts = p.pts || 0;
+        let pts = getStoredPlayerPoints(team, p._id);
         if (activeCaptainId && p._id.equals(activeCaptainId)) pts *= 2;
         else if (activeViceId && p._id.equals(activeViceId)) pts *= 1.5;
         totalPoints += pts;
@@ -120,6 +167,27 @@ export const getMatches = async (req, res) => {
   }
 };
 
+// @desc    Proxy selected API-Football resources through backend
+// @route   GET /api/matches/proxy/:resource
+// @access  Public
+export const proxyFootballData = async (req, res) => {
+  const { resource } = req.params;
+  if (!['fixtures', 'status'].includes(resource)) {
+    return res.status(400).json({ message: 'Unsupported proxy resource' });
+  }
+
+  try {
+    const result = await apiFootballRequest(resource, req.query);
+    if (!result.ok) {
+      return res.status(result.status).json(result.data);
+    }
+    res.status(200).json(result.data);
+  } catch (error) {
+    const statusCode = error.statusCode || 500;
+    res.status(statusCode).json({ message: error.message || 'Server error proxying football data' });
+  }
+};
+
 // @desc    Simulate a live event (For testing socket.io)
 // @route   POST /api/matches/simulate
 // @access  Public
@@ -130,14 +198,19 @@ export const simulateLiveEvent = async (req, res) => {
   if (!roomId || !event) {
     return res.status(400).json({ message: "Room ID and event data are required" });
   }
+  const room = await Room.findById(roomId).select('match');
+  if (!room) {
+    return res.status(404).json({ message: "Room not found" });
+  }
 
   // ডাটাবেসে প্লেয়ারের পয়েন্ট লাইভ আপডেট করা হচ্ছে
   if (event.playerId && event.numPts) {
-    await Player.findByIdAndUpdate(event.playerId, { $inc: { pts: event.numPts } });
 
     // ২. এই প্লেয়ার যেসব ফ্যান্টাসি টিমে আছে, তাদের totalPoints লাইভ আপডেট করা (Real-time Match Leaderboard এর জন্য)
-    const teams = await FantasyTeam.find({ players: event.playerId });
+    const teams = await FantasyTeam.find({ match: room.match, players: event.playerId });
     for (const team of teams) {
+      const currentPlayerPoints = getStoredPlayerPoints(team, event.playerId);
+      setStoredPlayerPoints(team, event.playerId, currentPlayerPoints + event.numPts);
       // চেক করা হচ্ছে প্লেয়ারটি মূল একাদশে (প্রথম ১১ জন) আছে কি না (বেঞ্চ প্লেয়ার পয়েন্ট পাবে না)
       const starters = team.players.length === 15 ? team.players.slice(0, 11) : team.players;
       const isStarter = starters.some(pId => pId.toString() === event.playerId.toString());
@@ -148,8 +221,8 @@ export const simulateLiveEvent = async (req, res) => {
         else if (team.viceCaptain && team.viceCaptain.toString() === event.playerId.toString()) ptsToAdd *= 1.5;
         
         team.totalPoints = (team.totalPoints || 0) + ptsToAdd;
-        await team.save();
       }
+      await team.save();
     }
   }
 
@@ -195,7 +268,7 @@ export const syncMatches = async (req, res) => {
           if (existingMatch) {
             if (existingMatch.status !== 'Finished' && status === 'Finished') {
               finishedMatchIds.push(existingMatch._id);
-              if (io) io.emit("match_finished");
+              if (io) io.emit("match_finished", { matchId: String(existingMatch._id) });
             }
             existingMatch.status = status;
             existingMatch.homeLogo = item.teams.home.logo || existingMatch.homeLogo;
