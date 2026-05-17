@@ -238,6 +238,8 @@ const upsertAppMatch = async (item, io) => {
     existingMatch.status = status;
     existingMatch.homeLogo = item.teams.home.logo || existingMatch.homeLogo;
     existingMatch.awayLogo = item.teams.away.logo || existingMatch.awayLogo;
+    existingMatch.homeTeamApiId = item.teams.home.id || existingMatch.homeTeamApiId;
+    existingMatch.awayTeamApiId = item.teams.away.id || existingMatch.awayTeamApiId;
     existingMatch.homeScore = item.goals.home || 0;
     existingMatch.awayScore = item.goals.away || 0;
     existingMatch.minute = item.fixture.status.elapsed ? `${item.fixture.status.elapsed}'` : "0'";
@@ -251,6 +253,8 @@ const upsertAppMatch = async (item, io) => {
     awayTeam: item.teams.away.name,
     homeLogo: item.teams.home.logo || '',
     awayLogo: item.teams.away.logo || '',
+    homeTeamApiId: item.teams.home.id,
+    awayTeamApiId: item.teams.away.id,
     homeScore: item.goals.home || 0,
     awayScore: item.goals.away || 0,
     status,
@@ -352,10 +356,14 @@ export const fetchAndSaveLiveMatches = async (io) => {
     } else {
       console.log('No live matches at the moment.');
     }
+  } catch (error) {
+    console.error('Error fetching live-only endpoint:', error.response?.data || error.message);
+  }
 
+  try {
     const syncResult = await syncMatchesFromApi(io);
     console.log(`Match sync result: ${syncResult.synced} synced, ${syncResult.finalized} finalized.`);
   } catch (error) {
-    console.error('Error fetching live matches:', error.message);
+    console.error('Error syncing dated fixtures:', error.response?.data || error.message);
   }
 };

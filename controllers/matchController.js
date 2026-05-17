@@ -346,6 +346,8 @@ export const syncMatches = async (req, res) => {
             existingMatch.status = status;
             existingMatch.homeLogo = item.teams.home.logo || existingMatch.homeLogo;
             existingMatch.awayLogo = item.teams.away.logo || existingMatch.awayLogo;
+            existingMatch.homeTeamApiId = item.teams.home.id || existingMatch.homeTeamApiId;
+            existingMatch.awayTeamApiId = item.teams.away.id || existingMatch.awayTeamApiId;
             existingMatch.homeScore = item.goals.home || 0;
             existingMatch.awayScore = item.goals.away || 0;
             existingMatch.minute = item.fixture.status.elapsed ? `${item.fixture.status.elapsed}'` : "0'";
@@ -354,6 +356,8 @@ export const syncMatches = async (req, res) => {
             await Match.create({
               fixtureId: item.fixture.id, homeTeam: item.teams.home.name,
               awayTeam: item.teams.away.name, homeLogo: item.teams.home.logo || '',
+              homeTeamApiId: item.teams.home.id,
+              awayTeamApiId: item.teams.away.id,
               awayLogo: item.teams.away.logo || '', homeScore: item.goals.home || 0,
               awayScore: item.goals.away || 0, status: status,
               matchTime: new Date(item.fixture.date), league: item.league.name,

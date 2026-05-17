@@ -30,6 +30,8 @@ export const createRoom = async (req, res) => {
             awayTeam: item.teams.away.name,
             homeLogo: item.teams.home.logo || '',
             awayLogo: item.teams.away.logo || '',
+            homeTeamApiId: item.teams.home.id,
+            awayTeamApiId: item.teams.away.id,
             matchTime: new Date(item.fixture.date),
             league: item.league.name,
             status: ['1H', '2H', 'HT', 'ET', 'P', 'LIVE'].includes(item.fixture.status.short)

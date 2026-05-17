@@ -5,6 +5,8 @@ const matchSchema = new mongoose.Schema({
   awayTeam: { type: String, required: true },
   homeLogo: { type: String, default: '' },
   awayLogo: { type: String, default: '' },
+  homeTeamApiId: { type: Number },
+  awayTeamApiId: { type: Number },
   homeScore: { type: Number, default: 0 },
   awayScore: { type: Number, default: 0 },
   status: { type: String, enum: ['Upcoming', 'Live', 'Finished'], default: 'Upcoming' },
