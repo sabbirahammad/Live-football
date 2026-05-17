@@ -53,6 +53,43 @@ const pickBestTeamMatch = (teams = [], teamName) => {
     || null;
 };
 
+const sameTeams = (fixture, match) => {
+  const home = normalizeTeamName(fixture?.teams?.home?.name);
+  const away = normalizeTeamName(fixture?.teams?.away?.name);
+  const matchHome = normalizeTeamName(match?.homeTeam);
+  const matchAway = normalizeTeamName(match?.awayTeam);
+
+  const exactOrder = home === matchHome && away === matchAway;
+  const looseOrder = home.includes(matchHome) || matchHome.includes(home);
+  const looseAway = away.includes(matchAway) || matchAway.includes(away);
+
+  return exactOrder || (looseOrder && looseAway);
+};
+
+const resolveFixtureByDate = async (match, apiKey) => {
+  if (!match?.matchTime) return null;
+
+  const baseDate = new Date(match.matchTime);
+  const offsets = [-1, 0, 1];
+
+  for (const offset of offsets) {
+    const probeDate = new Date(baseDate);
+    probeDate.setUTCDate(probeDate.getUTCDate() + offset);
+    const y = probeDate.getUTCFullYear();
+    const m = String(probeDate.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(probeDate.getUTCDate()).padStart(2, '0');
+    const dateParam = `${y}-${m}-${d}`;
+
+    const fixtureData = await fetchApiSportsJson(`https://v3.football.api-sports.io/fixtures?date=${dateParam}`, apiKey);
+    const matchedFixture = (fixtureData?.response || []).find(item => sameTeams(item, match));
+    if (matchedFixture?.teams?.home?.id && matchedFixture?.teams?.away?.id) {
+      return matchedFixture;
+    }
+  }
+
+  return null;
+};
+
 const createMatchFromFixture = async (matchId, apiKey) => {
   const fixtureData = await fetchApiSportsJson(`https://v3.football.api-sports.io/fixtures?id=${matchId}`, apiKey);
   const item = fixtureData?.response?.[0];
@@ -94,6 +131,20 @@ const resolveTeamIdsForMatch = async (match, apiKey) => {
         awayTeamId: match.awayTeamApiId
       };
     }
+  }
+
+  const datedFixture = await resolveFixtureByDate(match, apiKey);
+  if (datedFixture?.teams?.home?.id && datedFixture?.teams?.away?.id) {
+    match.fixtureId = datedFixture.fixture?.id || match.fixtureId;
+    match.homeTeamApiId = datedFixture.teams.home.id;
+    match.awayTeamApiId = datedFixture.teams.away.id;
+    match.homeLogo = datedFixture.teams.home.logo || match.homeLogo;
+    match.awayLogo = datedFixture.teams.away.logo || match.awayLogo;
+    await match.save();
+    return {
+      homeTeamId: match.homeTeamApiId,
+      awayTeamId: match.awayTeamApiId
+    };
   }
 
   const [homeSearch, awaySearch] = await Promise.all([
