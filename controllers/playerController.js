@@ -1,314 +1,29 @@
 import Player from '../models/Player.js';
 import Match from '../models/Match.js';
 
+// Helper function to generate realistic and consistent player prices based on their position
 const calculatePlayerPrice = (apiId, pos) => {
+  // Deterministic pseudo-random number between 0 and 1 based on player ID
+  // This ensures a specific player (e.g., Messi) always gets the exact same price every time we sync
   const seed = (apiId * 9301 + 49297) % 233280 / 233280;
-
-  let min;
-  let max;
+  
+  let min, max;
   switch (pos) {
-    case 'FWD': min = 8.0; max = 12.0; break;
-    case 'MID': min = 6.5; max = 10.0; break;
-    case 'DEF': min = 5.0; max = 7.5; break;
-    case 'GK': min = 4.0; max = 6.0; break;
+    case 'FWD': min = 8.0; max = 12.0; break; // Attackers are expensive
+    case 'MID': min = 6.5; max = 10.0; break; // Midfielders are medium-high
+    case 'DEF': min = 5.0; max = 7.5; break;  // Defenders are medium
+    case 'GK': min = 4.0; max = 6.0; break;   // Goalkeepers are cheap
     default: min = 6.0; max = 8.0;
   }
-
+  
+  // Calculate price and round to nearest 0.5 (e.g., 8.0, 8.5, 11.5)
   const rawPrice = min + (seed * (max - min));
   return Math.round(rawPrice * 2) / 2;
 };
 
-const positionMap = {
-  Goalkeeper: 'GK',
-  Defender: 'DEF',
-  Midfielder: 'MID',
-  Attacker: 'FWD',
-  G: 'GK',
-  D: 'DEF',
-  M: 'MID',
-  F: 'FWD'
-};
-
-const mapStatus = (shortStatus) => (
-  ['1H', '2H', 'HT', 'ET', 'P', 'LIVE'].includes(shortStatus)
-    ? 'Live'
-    : ['FT', 'AET', 'PEN'].includes(shortStatus)
-      ? 'Finished'
-      : 'Upcoming'
-);
-
-const fetchApiSportsJson = async (url, apiKey) => {
-  const response = await fetch(url, {
-    headers: { 'x-apisports-key': apiKey }
-  });
-  return response.json();
-};
-
-const normalizeTeamName = (value) => String(value || '')
-  .trim()
-  .toLowerCase()
-  .normalize('NFD')
-  .replace(/[\u0300-\u036f]/g, '')
-  .replace(/[^a-z0-9\s]/g, ' ')
-  .replace(/\b(fc|cf|sc|ac|afc|fk|club|deportivo|sporting|athletic|atletico|united|city|club de futbol)\b/g, ' ')
-  .replace(/\s+/g, ' ')
-  .trim();
-
-const teamNameTokens = (value) => normalizeTeamName(value).split(' ').filter(Boolean);
-
-const tokenOverlapScore = (aValue, bValue) => {
-  const aTokens = teamNameTokens(aValue);
-  const bTokens = teamNameTokens(bValue);
-  if (aTokens.length === 0 || bTokens.length === 0) return 0;
-
-  const bSet = new Set(bTokens);
-  let hits = 0;
-  for (const token of aTokens) {
-    if (bSet.has(token)) hits += 1;
-  }
-  return hits / Math.max(aTokens.length, bTokens.length);
-};
-
-const buildSearchVariants = (teamName) => {
-  const raw = String(teamName || '').trim();
-  const normalized = normalizeTeamName(teamName);
-  const tokens = normalized.split(' ').filter(Boolean);
-  const variants = new Set([raw, normalized]);
-
-  if (tokens.length > 1) {
-    variants.add(tokens.slice(0, 2).join(' '));
-    variants.add(tokens.slice(-2).join(' '));
-  }
-  if (tokens.length > 0) {
-    variants.add(tokens[0]);
-  }
-
-  return [...variants].filter(v => v && v.length >= 3);
-};
-
-const pickBestTeamMatch = (teams = [], teamName) => {
-  const normalizedTarget = normalizeTeamName(teamName);
-  let best = null;
-  let bestScore = 0;
-
-  for (const team of teams) {
-    const candidateName = team?.team?.name;
-    const normalizedCandidate = normalizeTeamName(candidateName);
-    if (!normalizedCandidate) continue;
-
-    if (normalizedCandidate === normalizedTarget) return team;
-
-    let score = tokenOverlapScore(candidateName, teamName);
-    if (normalizedCandidate.includes(normalizedTarget) || normalizedTarget.includes(normalizedCandidate)) {
-      score = Math.max(score, 0.9);
-    }
-
-    if (score > bestScore) {
-      best = team;
-      bestScore = score;
-    }
-  }
-
-  return bestScore >= 0.5 ? best : null;
-};
-
-const sameTeams = (fixture, match) => {
-  const home = normalizeTeamName(fixture?.teams?.home?.name);
-  const away = normalizeTeamName(fixture?.teams?.away?.name);
-  const matchHome = normalizeTeamName(match?.homeTeam);
-  const matchAway = normalizeTeamName(match?.awayTeam);
-
-  const exactOrder = home === matchHome && away === matchAway;
-  const looseOrder = home.includes(matchHome) || matchHome.includes(home) || tokenOverlapScore(home, matchHome) >= 0.5;
-  const looseAway = away.includes(matchAway) || matchAway.includes(away) || tokenOverlapScore(away, matchAway) >= 0.5;
-
-  return exactOrder || (looseOrder && looseAway);
-};
-
-const resolveFixtureByDate = async (match, apiKey) => {
-  if (!match?.matchTime) return null;
-
-  const baseDate = new Date(match.matchTime);
-  const offsets = [-2, -1, 0, 1, 2];
-
-  for (const offset of offsets) {
-    const probeDate = new Date(baseDate);
-    probeDate.setUTCDate(probeDate.getUTCDate() + offset);
-    const y = probeDate.getUTCFullYear();
-    const m = String(probeDate.getUTCMonth() + 1).padStart(2, '0');
-    const d = String(probeDate.getUTCDate()).padStart(2, '0');
-    const dateParam = `${y}-${m}-${d}`;
-
-    const fixtureData = await fetchApiSportsJson(`https://v3.football.api-sports.io/fixtures?date=${dateParam}`, apiKey);
-    const matchedFixture = (fixtureData?.response || []).find(item => sameTeams(item, match));
-    if (matchedFixture?.teams?.home?.id && matchedFixture?.teams?.away?.id) {
-      return matchedFixture;
-    }
-  }
-
-  return null;
-};
-
-const createMatchFromFixture = async (matchId, apiKey) => {
-  const fixtureData = await fetchApiSportsJson(`https://v3.football.api-sports.io/fixtures?id=${matchId}`, apiKey);
-  const item = fixtureData?.response?.[0];
-  if (!item) return null;
-
-  return Match.create({
-    fixtureId: item.fixture.id,
-    homeTeam: item.teams.home.name,
-    awayTeam: item.teams.away.name,
-    homeLogo: item.teams.home.logo || '',
-    awayLogo: item.teams.away.logo || '',
-    homeTeamApiId: item.teams.home.id,
-    awayTeamApiId: item.teams.away.id,
-    matchTime: new Date(item.fixture.date),
-    league: item.league.name,
-    status: mapStatus(item.fixture.status.short)
-  });
-};
-
-const resolveTeamIdsForMatch = async (match, apiKey) => {
-  if (match.homeTeamApiId && match.awayTeamApiId) {
-    return {
-      homeTeamId: match.homeTeamApiId,
-      awayTeamId: match.awayTeamApiId
-    };
-  }
-
-  if (match.fixtureId) {
-    const fixtureData = await fetchApiSportsJson(`https://v3.football.api-sports.io/fixtures?id=${match.fixtureId}`, apiKey);
-    const fixture = fixtureData?.response?.[0];
-    if (fixture?.teams?.home?.id && fixture?.teams?.away?.id) {
-      match.homeTeamApiId = fixture.teams.home.id;
-      match.awayTeamApiId = fixture.teams.away.id;
-      match.homeLogo = fixture.teams.home.logo || match.homeLogo;
-      match.awayLogo = fixture.teams.away.logo || match.awayLogo;
-      await match.save();
-      return {
-        homeTeamId: match.homeTeamApiId,
-        awayTeamId: match.awayTeamApiId
-      };
-    }
-  }
-
-  const datedFixture = await resolveFixtureByDate(match, apiKey);
-  if (datedFixture?.teams?.home?.id && datedFixture?.teams?.away?.id) {
-    match.fixtureId = datedFixture.fixture?.id || match.fixtureId;
-    match.homeTeamApiId = datedFixture.teams.home.id;
-    match.awayTeamApiId = datedFixture.teams.away.id;
-    match.homeLogo = datedFixture.teams.home.logo || match.homeLogo;
-    match.awayLogo = datedFixture.teams.away.logo || match.awayLogo;
-    await match.save();
-    return {
-      homeTeamId: match.homeTeamApiId,
-      awayTeamId: match.awayTeamApiId
-    };
-  }
-
-  const searchTeamWithVariants = async (teamName) => {
-    const variants = buildSearchVariants(teamName);
-    const results = [];
-    for (const variant of variants) {
-      const response = await fetchApiSportsJson(`https://v3.football.api-sports.io/teams?search=${encodeURIComponent(variant)}`, apiKey);
-      if (Array.isArray(response?.response)) {
-        results.push(...response.response);
-      }
-    }
-    return pickBestTeamMatch(results, teamName);
-  };
-
-  const [homeTeam, awayTeam] = await Promise.all([
-    searchTeamWithVariants(match.homeTeam),
-    searchTeamWithVariants(match.awayTeam)
-  ]);
-
-  if (!homeTeam?.team?.id || !awayTeam?.team?.id) {
-    return null;
-  }
-
-  match.homeTeamApiId = homeTeam.team.id;
-  match.awayTeamApiId = awayTeam.team.id;
-  match.homeLogo = homeTeam.team.logo || match.homeLogo;
-  match.awayLogo = awayTeam.team.logo || match.awayLogo;
-  await match.save();
-
-  return {
-    homeTeamId: match.homeTeamApiId,
-    awayTeamId: match.awayTeamApiId
-  };
-};
-
-const syncPlayersForExistingMatch = async (match, apiKey) => {
-  const teamIds = await resolveTeamIdsForMatch(match, apiKey);
-  if (!teamIds?.homeTeamId || !teamIds?.awayTeamId) {
-    return null;
-  }
-
-  const requests = [
-    fetchApiSportsJson(`https://v3.football.api-sports.io/players/squads?team=${teamIds.homeTeamId}`, apiKey),
-    fetchApiSportsJson(`https://v3.football.api-sports.io/players/squads?team=${teamIds.awayTeamId}`, apiKey),
-    match.fixtureId
-      ? fetchApiSportsJson(`https://v3.football.api-sports.io/injuries?fixture=${match.fixtureId}`, apiKey)
-      : Promise.resolve({ response: [] })
-  ];
-
-  const [homeSquadData, awaySquadData, injuryData] = await Promise.all(requests);
-
-  const injuredPlayerIds = new Set();
-  if (injuryData?.response) {
-    injuryData.response.forEach(inj => {
-      if (inj.player?.id) injuredPlayerIds.add(inj.player.id);
-    });
-  }
-
-  const squads = [];
-  if (homeSquadData?.response?.length > 0) squads.push(homeSquadData.response[0]);
-  if (awaySquadData?.response?.length > 0) squads.push(awaySquadData.response[0]);
-
-  if (squads.length === 0) {
-    return [];
-  }
-
-  const bulkOps = [];
-  const playerApiIds = [];
-
-  for (const teamData of squads) {
-    for (const p of teamData.players || []) {
-      playerApiIds.push(p.id);
-      const mappedPos = positionMap[p.position] || positionMap[p.pos] || 'MID';
-      bulkOps.push({
-        updateOne: {
-          filter: { apiId: p.id },
-          update: {
-            $set: {
-              apiId: p.id,
-              name: p.name,
-              pos: mappedPos,
-              price: calculatePlayerPrice(p.id, mappedPos),
-              teamApiId: teamData.team.id,
-              team: teamData.team.name,
-              teamLogo: teamData.team.logo || '',
-              isInjured: injuredPlayerIds.has(p.id),
-              img: p.photo,
-            }
-          },
-          upsert: true
-        }
-      });
-    }
-  }
-
-  if (bulkOps.length > 0) {
-    await Player.bulkWrite(bulkOps);
-  }
-
-  const playerDocs = await Player.find({ apiId: { $in: playerApiIds } });
-  match.players = playerDocs.map(p => p._id);
-  await match.save();
-  return playerDocs;
-};
-
+// @desc    Get all players
+// @route   GET /api/players
+// @access  Public
 export const getPlayers = async (req, res) => {
   try {
     const players = await Player.find({});
@@ -318,10 +33,13 @@ export const getPlayers = async (req, res) => {
   }
 };
 
+// @desc    Get all players for a specific match from DB
+// @route   GET /api/players/:matchId
+// @access  Public
 export const getPlayersForMatch = async (req, res) => {
   try {
     const matchId = req.params.matchId;
-    let match = null;
+    let match;
 
     if (!isNaN(matchId)) {
       match = await Match.findOne({ fixtureId: Number(matchId) }).populate('players');
@@ -329,11 +47,29 @@ export const getPlayersForMatch = async (req, res) => {
       match = await Match.findById(matchId).populate('players');
     }
 
-    if (!match && !isNaN(matchId) && process.env.FOOTBALL_API_KEY) {
-      console.log(`Auto-syncing Match ${matchId} to DB...`);
-      match = await createMatchFromFixture(matchId, process.env.FOOTBALL_API_KEY);
-      if (match) {
-        match = await Match.findById(match._id).populate('players');
+    // Auto-sync Match from API-Football if not in MongoDB
+    if (!match && !isNaN(matchId)) {
+      const apiKey = process.env.FOOTBALL_API_KEY;
+      if (apiKey) {
+        console.log(`Auto-syncing Match ${matchId} to DB...`);
+        const fixtureRes = await fetch(`https://v3.football.api-sports.io/fixtures?id=${matchId}`, {
+          headers: { 'x-apisports-key': apiKey }
+        });
+        const fixtureData = await fixtureRes.json();
+        if (fixtureData.response && fixtureData.response.length > 0) {
+          const item = fixtureData.response[0];
+          match = await Match.create({
+            fixtureId: item.fixture.id,
+            homeTeam: item.teams.home.name,
+            awayTeam: item.teams.away.name,
+            homeLogo: item.teams.home.logo || '',
+            awayLogo: item.teams.away.logo || '',
+            matchTime: new Date(item.fixture.date),
+            league: item.league.name,
+            status: ['1H','2H','HT','ET','P','LIVE'].includes(item.fixture.status.short) ? 'Live' : 
+                    ['FT','AET','PEN'].includes(item.fixture.status.short) ? 'Finished' : 'Upcoming'
+          });
+        }
       }
     }
 
@@ -341,11 +77,105 @@ export const getPlayersForMatch = async (req, res) => {
       return res.status(404).json({ message: 'Match not found' });
     }
 
-    if (match.players.length === 0 && process.env.FOOTBALL_API_KEY) {
-      console.log(`Auto-syncing players for match: ${match.homeTeam} vs ${match.awayTeam}`);
-      const playerDocs = await syncPlayersForExistingMatch(match, process.env.FOOTBALL_API_KEY);
-      if (Array.isArray(playerDocs) && playerDocs.length > 0) {
-        return res.status(200).json(playerDocs);
+    // Auto-sync players if empty
+    if (match.players.length === 0 && match.fixtureId) {
+      const apiKey = process.env.FOOTBALL_API_KEY;
+      if (apiKey) {
+        console.log(`Auto-syncing players for fixture ID: ${match.fixtureId}`);
+        
+        let homeTeamId = match.homeTeamApiId;
+        let awayTeamId = match.awayTeamApiId;
+
+        if (!homeTeamId || !awayTeamId) {
+          const fixtureRes = await fetch(`https://v3.football.api-sports.io/fixtures?id=${match.fixtureId}`, {
+            headers: { 'x-apisports-key': apiKey }
+          });
+          const fixtureData = await fixtureRes.json();
+
+          if (fixtureData.response && fixtureData.response.length > 0) {
+            homeTeamId = fixtureData.response[0].teams.home.id;
+            awayTeamId = fixtureData.response[0].teams.away.id;
+            
+            match.homeTeamApiId = homeTeamId;
+            match.awayTeamApiId = awayTeamId;
+            await match.save();
+          }
+        }
+
+        if (homeTeamId && awayTeamId) {
+
+          // ২. Home, Away টিমের স্কোয়াড এবং রিয়েল ইনজুরি লিস্ট আনা
+          const [homeSquadRes, awaySquadRes, injuryRes] = await Promise.all([
+            fetch(`https://v3.football.api-sports.io/players/squads?team=${homeTeamId}`, { headers: { 'x-apisports-key': apiKey } }),
+            fetch(`https://v3.football.api-sports.io/players/squads?team=${awayTeamId}`, { headers: { 'x-apisports-key': apiKey } }),
+            fetch(`https://v3.football.api-sports.io/injuries?fixture=${match.fixtureId}`, { headers: { 'x-apisports-key': apiKey } })
+          ]);
+          
+          const homeSquadData = await homeSquadRes.json();
+          const awaySquadData = await awaySquadRes.json();
+          const injuryData = await injuryRes.json();
+
+          const injuredPlayerIds = new Set();
+          if (injuryData.response) {
+            injuryData.response.forEach(inj => {
+              if (inj.player && inj.player.id) injuredPlayerIds.add(inj.player.id);
+            });
+          }
+
+          const squads = [];
+          if (homeSquadData.response && homeSquadData.response.length > 0) squads.push(homeSquadData.response[0]);
+          if (awaySquadData.response && awaySquadData.response.length > 0) squads.push(awaySquadData.response[0]);
+
+          if (squads.length > 0) {
+            const positionMap = { 
+              'Goalkeeper': 'GK', 'Defender': 'DEF', 'Midfielder': 'MID', 'Attacker': 'FWD',
+              'G': 'GK', 'D': 'DEF', 'M': 'MID', 'F': 'FWD' 
+            };
+          const bulkOps = [];
+          const playerApiIds = [];
+
+            for (const teamData of squads) {
+              for (const p of teamData.players) {
+                playerApiIds.push(p.id);
+                const mappedPos = positionMap[p.position] || positionMap[p.pos] || 'MID';
+              bulkOps.push({
+                updateOne: {
+                  filter: { apiId: p.id },
+                  update: {
+                    $set: {
+                      apiId: p.id,
+                      name: p.name,
+                        pos: mappedPos,
+                        price: calculatePlayerPrice(p.id, mappedPos),
+                        teamApiId: teamData.team.id,
+                        team: teamData.team.name,
+                        teamLogo: teamData.team.logo || '',
+                        isInjured: injuredPlayerIds.has(p.id),
+                      img: p.photo,
+                    }
+                  },
+                  upsert: true
+                }
+              });
+            }
+          }
+
+          if (bulkOps.length > 0) {
+            await Player.bulkWrite(bulkOps);
+            console.log(`Bulk write successful for ${bulkOps.length} players.`);
+          }
+
+          const playerDocs = await Player.find({ apiId: { $in: playerApiIds } });
+          const playerObjectIds = playerDocs.map(p => p._id);
+
+          match.players = playerObjectIds;
+          await match.save();
+
+          return res.status(200).json(playerDocs);
+        } else {
+          return res.status(400).json({ message: "Could not resolve team IDs for this match from API." });
+        }
+      }
       }
     }
 
@@ -355,6 +185,9 @@ export const getPlayersForMatch = async (req, res) => {
   }
 };
 
+// @desc    Sync players for a match from API-Football and save to DB
+// @route   POST /api/players/sync/:matchId
+// @access  Private
 export const syncPlayersForMatch = async (req, res) => {
   const { matchId } = req.params;
   const apiKey = process.env.FOOTBALL_API_KEY;
@@ -365,25 +198,112 @@ export const syncPlayersForMatch = async (req, res) => {
 
   try {
     const match = await Match.findById(matchId);
-    if (!match) {
-      return res.status(404).json({ message: 'Match not found.' });
+    if (!match || !match.fixtureId) {
+      return res.status(404).json({ message: 'Match or fixture ID not found.' });
     }
 
-    console.log(`Syncing players for match: ${match.homeTeam} vs ${match.awayTeam}`);
-    const playerDocs = await syncPlayersForExistingMatch(match, apiKey);
+    console.log(`Syncing players for fixture ID: ${match.fixtureId}`);
 
-    if (playerDocs === null) {
-      return res.status(404).json({ message: 'Could not resolve team IDs for this match from API.' });
+    let homeTeamId = match.homeTeamApiId;
+    let awayTeamId = match.awayTeamApiId;
+
+    if (!homeTeamId || !awayTeamId) {
+      const fixtureRes = await fetch(`https://v3.football.api-sports.io/fixtures?id=${match.fixtureId}`, {
+        headers: { 'x-apisports-key': apiKey }
+      });
+      const fixtureData = await fixtureRes.json();
+
+      if (!fixtureData.response || fixtureData.response.length === 0) {
+        return res.status(404).json({ message: 'Match details not found from API.' });
+      }
+
+      homeTeamId = fixtureData.response[0].teams.home.id;
+      awayTeamId = fixtureData.response[0].teams.away.id;
+      match.homeTeamApiId = homeTeamId;
+      match.awayTeamApiId = awayTeamId;
+      await match.save();
     }
 
-    if (playerDocs.length === 0) {
+    if (!homeTeamId || !awayTeamId) {
+      return res.status(400).json({ message: "Could not resolve team IDs for this match from API." });
+    }
+
+    const [homeSquadRes, awaySquadRes, injuryRes] = await Promise.all([
+      fetch(`https://v3.football.api-sports.io/players/squads?team=${homeTeamId}`, { headers: { 'x-apisports-key': apiKey } }),
+      fetch(`https://v3.football.api-sports.io/players/squads?team=${awayTeamId}`, { headers: { 'x-apisports-key': apiKey } }),
+      fetch(`https://v3.football.api-sports.io/injuries?fixture=${match.fixtureId}`, { headers: { 'x-apisports-key': apiKey } })
+    ]);
+    
+    const homeSquadData = await homeSquadRes.json();
+    const awaySquadData = await awaySquadRes.json();
+    const injuryData = await injuryRes.json();
+
+    const injuredPlayerIds = new Set();
+    if (injuryData.response) {
+      injuryData.response.forEach(inj => {
+        if (inj.player && inj.player.id) injuredPlayerIds.add(inj.player.id);
+      });
+    }
+
+    const squads = [];
+    if (homeSquadData.response && homeSquadData.response.length > 0) squads.push(homeSquadData.response[0]);
+    if (awaySquadData.response && awaySquadData.response.length > 0) squads.push(awaySquadData.response[0]);
+
+    if (squads.length === 0) {
       return res.status(404).json({ message: 'No squad data found for these teams from API.' });
     }
 
-    res.status(200).json({
-      message: `Synced ${playerDocs.length} players for match ${match.homeTeam} vs ${match.awayTeam}`,
-      players: playerDocs
+    const positionMap = { 
+      'Goalkeeper': 'GK', 'Defender': 'DEF', 'Midfielder': 'MID', 'Attacker': 'FWD',
+      'G': 'GK', 'D': 'DEF', 'M': 'MID', 'F': 'FWD' 
+    };
+    const bulkOps = [];
+    const playerApiIds = [];
+
+    for (const teamData of squads) {
+      for (const p of teamData.players) {
+        playerApiIds.push(p.id);
+        const mappedPos = positionMap[p.position] || positionMap[p.pos] || 'MID';
+        bulkOps.push({
+          updateOne: {
+            filter: { apiId: p.id },
+            update: {
+              $set: {
+                apiId: p.id,
+                name: p.name,
+                pos: mappedPos,
+                price: calculatePlayerPrice(p.id, mappedPos),
+                teamApiId: teamData.team.id,
+                team: teamData.team.name,
+                teamLogo: teamData.team.logo || '',
+                isInjured: injuredPlayerIds.has(p.id),
+                img: p.photo,
+              }
+            },
+            upsert: true
+          }
+        });
+      }
+    }
+
+    if (bulkOps.length > 0) {
+      await Player.bulkWrite(bulkOps);
+      console.log(`Bulk write successful for ${bulkOps.length} players.`);
+    }
+
+    // Get the IDs of the players we just saved/updated
+    const playerDocs = await Player.find({ apiId: { $in: playerApiIds } });
+    const playerObjectIds = playerDocs.map(p => p._id);
+
+    // Update the match document with the player ObjectIDs
+    match.players = playerObjectIds;
+    await match.save();
+
+    res.status(200).json({ 
+      message: `Synced ${playerObjectIds.length} players for match ${match.homeTeam} vs ${match.awayTeam}`, 
+      players: playerDocs 
     });
+
   } catch (error) {
     console.error("Error syncing players:", error);
     res.status(500).json({ message: 'Server error syncing players', error: error.message });
