@@ -56,6 +56,11 @@ export const getPlayersForMatch = async (req, res) => {
           headers: { 'x-apisports-key': apiKey }
         });
         const fixtureData = await fixtureRes.json();
+        
+        if (fixtureData.errors && Object.keys(fixtureData.errors).length > 0) {
+          return res.status(429).json({ message: `API-Sports Error: ${Object.values(fixtureData.errors)[0]}` });
+        }
+
         if (fixtureData.response && fixtureData.response.length > 0) {
           const item = fixtureData.response[0];
           match = await Match.create({
@@ -92,6 +97,10 @@ export const getPlayersForMatch = async (req, res) => {
           });
           const fixtureData = await fixtureRes.json();
 
+          if (fixtureData.errors && Object.keys(fixtureData.errors).length > 0) {
+            return res.status(429).json({ message: `API-Sports Error: ${Object.values(fixtureData.errors)[0]}` });
+          }
+
           if (fixtureData.response && fixtureData.response.length > 0) {
             homeTeamId = fixtureData.response[0].teams.home.id;
             awayTeamId = fixtureData.response[0].teams.away.id;
@@ -99,6 +108,8 @@ export const getPlayersForMatch = async (req, res) => {
             match.homeTeamApiId = homeTeamId;
             match.awayTeamApiId = awayTeamId;
             await match.save();
+          } else {
+            return res.status(404).json({ message: 'Match details not found from API.' });
           }
         }
 
@@ -114,6 +125,13 @@ export const getPlayersForMatch = async (req, res) => {
           const homeSquadData = await homeSquadRes.json();
           const awaySquadData = await awaySquadRes.json();
           const injuryData = await injuryRes.json();
+
+          if (homeSquadData.errors && Object.keys(homeSquadData.errors).length > 0) {
+            return res.status(429).json({ message: `API-Sports Error: ${Object.values(homeSquadData.errors)[0]}` });
+          }
+          if (awaySquadData.errors && Object.keys(awaySquadData.errors).length > 0) {
+            return res.status(429).json({ message: `API-Sports Error: ${Object.values(awaySquadData.errors)[0]}` });
+          }
 
           const injuredPlayerIds = new Set();
           if (injuryData.response) {
@@ -200,6 +218,8 @@ export const syncPlayersForMatch = async (req, res) => {
     const match = await Match.findById(matchId);
     if (!match || !match.fixtureId) {
       return res.status(404).json({ message: 'Match or fixture ID not found.' });
+          } else {
+            return res.status(404).json({ message: 'No squad data found for these teams from API.' });
     }
 
     console.log(`Syncing players for fixture ID: ${match.fixtureId}`);
@@ -212,6 +232,10 @@ export const syncPlayersForMatch = async (req, res) => {
         headers: { 'x-apisports-key': apiKey }
       });
       const fixtureData = await fixtureRes.json();
+
+      if (fixtureData.errors && Object.keys(fixtureData.errors).length > 0) {
+        return res.status(429).json({ message: `API-Sports Error: ${Object.values(fixtureData.errors)[0]}` });
+      }
 
       if (!fixtureData.response || fixtureData.response.length === 0) {
         return res.status(404).json({ message: 'Match details not found from API.' });
@@ -237,6 +261,13 @@ export const syncPlayersForMatch = async (req, res) => {
     const homeSquadData = await homeSquadRes.json();
     const awaySquadData = await awaySquadRes.json();
     const injuryData = await injuryRes.json();
+
+    if (homeSquadData.errors && Object.keys(homeSquadData.errors).length > 0) {
+      return res.status(429).json({ message: `API-Sports Error: ${Object.values(homeSquadData.errors)[0]}` });
+    }
+    if (awaySquadData.errors && Object.keys(awaySquadData.errors).length > 0) {
+      return res.status(429).json({ message: `API-Sports Error: ${Object.values(awaySquadData.errors)[0]}` });
+    }
 
     const injuredPlayerIds = new Set();
     if (injuryData.response) {
