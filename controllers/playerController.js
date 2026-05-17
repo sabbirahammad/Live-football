@@ -44,13 +44,72 @@ const fetchApiSportsJson = async (url, apiKey) => {
   return response.json();
 };
 
-const normalizeTeamName = (value) => String(value || '').trim().toLowerCase();
+const normalizeTeamName = (value) => String(value || '')
+  .trim()
+  .toLowerCase()
+  .normalize('NFD')
+  .replace(/[\u0300-\u036f]/g, '')
+  .replace(/[^a-z0-9\s]/g, ' ')
+  .replace(/\b(fc|cf|sc|ac|afc|fk|club|deportivo|sporting|athletic|atletico|united|city|club de futbol)\b/g, ' ')
+  .replace(/\s+/g, ' ')
+  .trim();
+
+const teamNameTokens = (value) => normalizeTeamName(value).split(' ').filter(Boolean);
+
+const tokenOverlapScore = (aValue, bValue) => {
+  const aTokens = teamNameTokens(aValue);
+  const bTokens = teamNameTokens(bValue);
+  if (aTokens.length === 0 || bTokens.length === 0) return 0;
+
+  const bSet = new Set(bTokens);
+  let hits = 0;
+  for (const token of aTokens) {
+    if (bSet.has(token)) hits += 1;
+  }
+  return hits / Math.max(aTokens.length, bTokens.length);
+};
+
+const buildSearchVariants = (teamName) => {
+  const raw = String(teamName || '').trim();
+  const normalized = normalizeTeamName(teamName);
+  const tokens = normalized.split(' ').filter(Boolean);
+  const variants = new Set([raw, normalized]);
+
+  if (tokens.length > 1) {
+    variants.add(tokens.slice(0, 2).join(' '));
+    variants.add(tokens.slice(-2).join(' '));
+  }
+  if (tokens.length > 0) {
+    variants.add(tokens[0]);
+  }
+
+  return [...variants].filter(v => v && v.length >= 3);
+};
 
 const pickBestTeamMatch = (teams = [], teamName) => {
   const normalizedTarget = normalizeTeamName(teamName);
-  return teams.find(team => normalizeTeamName(team?.team?.name) === normalizedTarget)
-    || teams.find(team => normalizeTeamName(team?.team?.name).includes(normalizedTarget))
-    || null;
+  let best = null;
+  let bestScore = 0;
+
+  for (const team of teams) {
+    const candidateName = team?.team?.name;
+    const normalizedCandidate = normalizeTeamName(candidateName);
+    if (!normalizedCandidate) continue;
+
+    if (normalizedCandidate === normalizedTarget) return team;
+
+    let score = tokenOverlapScore(candidateName, teamName);
+    if (normalizedCandidate.includes(normalizedTarget) || normalizedTarget.includes(normalizedCandidate)) {
+      score = Math.max(score, 0.9);
+    }
+
+    if (score > bestScore) {
+      best = team;
+      bestScore = score;
+    }
+  }
+
+  return bestScore >= 0.5 ? best : null;
 };
 
 const sameTeams = (fixture, match) => {
@@ -60,8 +119,8 @@ const sameTeams = (fixture, match) => {
   const matchAway = normalizeTeamName(match?.awayTeam);
 
   const exactOrder = home === matchHome && away === matchAway;
-  const looseOrder = home.includes(matchHome) || matchHome.includes(home);
-  const looseAway = away.includes(matchAway) || matchAway.includes(away);
+  const looseOrder = home.includes(matchHome) || matchHome.includes(home) || tokenOverlapScore(home, matchHome) >= 0.5;
+  const looseAway = away.includes(matchAway) || matchAway.includes(away) || tokenOverlapScore(away, matchAway) >= 0.5;
 
   return exactOrder || (looseOrder && looseAway);
 };
@@ -70,7 +129,7 @@ const resolveFixtureByDate = async (match, apiKey) => {
   if (!match?.matchTime) return null;
 
   const baseDate = new Date(match.matchTime);
-  const offsets = [-1, 0, 1];
+  const offsets = [-2, -1, 0, 1, 2];
 
   for (const offset of offsets) {
     const probeDate = new Date(baseDate);
@@ -147,13 +206,22 @@ const resolveTeamIdsForMatch = async (match, apiKey) => {
     };
   }
 
-  const [homeSearch, awaySearch] = await Promise.all([
-    fetchApiSportsJson(`https://v3.football.api-sports.io/teams?search=${encodeURIComponent(match.homeTeam)}`, apiKey),
-    fetchApiSportsJson(`https://v3.football.api-sports.io/teams?search=${encodeURIComponent(match.awayTeam)}`, apiKey)
-  ]);
+  const searchTeamWithVariants = async (teamName) => {
+    const variants = buildSearchVariants(teamName);
+    const results = [];
+    for (const variant of variants) {
+      const response = await fetchApiSportsJson(`https://v3.football.api-sports.io/teams?search=${encodeURIComponent(variant)}`, apiKey);
+      if (Array.isArray(response?.response)) {
+        results.push(...response.response);
+      }
+    }
+    return pickBestTeamMatch(results, teamName);
+  };
 
-  const homeTeam = pickBestTeamMatch(homeSearch?.response, match.homeTeam);
-  const awayTeam = pickBestTeamMatch(awaySearch?.response, match.awayTeam);
+  const [homeTeam, awayTeam] = await Promise.all([
+    searchTeamWithVariants(match.homeTeam),
+    searchTeamWithVariants(match.awayTeam)
+  ]);
 
   if (!homeTeam?.team?.id || !awayTeam?.team?.id) {
     return null;
