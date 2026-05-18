@@ -1,7 +1,23 @@
 import { exec } from 'child_process';
 import path from 'path';
 import fs from 'fs';
+import mongoose from 'mongoose';
 import Match from '../models/Match.js';
+
+const resolveMatchFromParam = async (matchId) => {
+  const rawMatchId = String(matchId || '').trim();
+  let match = null;
+
+  if (/^\d+$/.test(rawMatchId)) {
+    match = await Match.findOne({ fixtureId: Number(rawMatchId) });
+  }
+
+  if (!match && mongoose.isValidObjectId(rawMatchId)) {
+    match = await Match.findById(rawMatchId);
+  }
+
+  return match;
+};
 
 export const checkStreamHealth = async (req, res) => {
   try {
@@ -16,10 +32,7 @@ export const getMatchStreams = async (req, res) => {
   const { matchId } = req.params;
   
   try {
-    let match = await Match.findById(matchId);
-    if (!match && !isNaN(matchId)) {
-      match = await Match.findOne({ fixtureId: Number(matchId) });
-    }
+    const match = await resolveMatchFromParam(matchId);
 
     if (!match) {
       return res.status(404).json({ available: false, message: 'Match not found' });
@@ -61,6 +74,7 @@ export const getMatchStreams = async (req, res) => {
       }
     });
   } catch (error) {
+    console.error("Stream error details:", error);
     res.status(500).json({ available: false, message: 'Error fetching streams' });
   }
 };
