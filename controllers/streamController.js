@@ -3,6 +3,10 @@ import path from 'path';
 import fs from 'fs';
 import mongoose from 'mongoose';
 import Match from '../models/Match.js';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const resolveMatchFromParam = async (matchId) => {
   const rawMatchId = String(matchId || '').trim();
@@ -38,8 +42,8 @@ export const getMatchStreams = async (req, res) => {
       return res.status(404).json({ available: false, message: 'Match not found' });
     }
 
-    // আপনার লোকাল পিসির পাইথন স্ক্রিপ্টের পাথ
-    const pythonScriptPath = path.resolve('../IPTV-SCRAPPER-main (1)/IPTV-SCRAPPER-main/iptv_scraper/cli.py');
+    // __dirname ব্যবহার করে একেবারে সঠিক Absolute Path তৈরি করা হলো
+    const pythonScriptPath = path.join(__dirname, '../../IPTV-SCRAPPER-main (1)/IPTV-SCRAPPER-main/iptv_scraper/cli.py');
     
     // স্ক্রিপ্ট না পেলে ডামি লিংক না দেখিয়ে এরর দেখাবে
     if (!fs.existsSync(pythonScriptPath)) {
