@@ -41,6 +41,7 @@ app.set('io', io);
 app.use(helmet({ crossOriginResourcePolicy: false })); // HTTP security headers (রিলাক্স করা হলো যাতে অ্যাপে ব্লক না হয়)
 app.use(cors({ origin: '*' })); // সব সোর্স থেকে Cross-Origin রিকোয়েস্ট অ্যালাও
 app.use(express.json({ limit: '10mb' })); // বড় সাইজের Base64 Image parse করার জন্য
+app.use(express.urlencoded({ extended: true, limit: '10mb' })); // ফর্ম ডেটা পার্স করার জন্য
 app.use(morgan('dev'));      // API Request log দেখার জন্য
 
 // API Routes
@@ -187,4 +188,3 @@ cron.schedule('0 0 * * 0', async () => {
 
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => console.log(`🚀 Server running in ${process.env.NODE_ENV} mode on port ${PORT}`));
-
