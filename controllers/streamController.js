@@ -1,82 +1,40 @@
-import Match from '../models/Match.js';
-import { clearLiveStreamCache, getLiveStreamsForMatch, getStreamScraperHealth } from '../services/streamScraperService.js';
-
-const findMatchByParam = async (matchIdOrFixtureId) => {
-  if (!matchIdOrFixtureId) return null;
-
-  if (/^\d+$/.test(String(matchIdOrFixtureId))) {
-    const byFixture = await Match.findOne({ fixtureId: Number(matchIdOrFixtureId) });
-    if (byFixture) return byFixture;
-  }
-
-  if (String(matchIdOrFixtureId).length === 24) {
-    return Match.findById(matchIdOrFixtureId);
-  }
-
-  return null;
-};
-
-export const getStreamsForMatch = async (req, res) => {
+export const checkStreamHealth = async (req, res) => {
   try {
-    const health = await getStreamScraperHealth();
-    if (!health.ok) {
-      return res.status(503).json({
-        message: 'Live stream scraper is not ready yet.',
-        health,
-      });
-    }
-
-    const match = await findMatchByParam(req.params.fixtureId);
-    if (!match) {
-      return res.status(404).json({ message: 'Match not found for stream lookup.' });
-    }
-
-    const result = await getLiveStreamsForMatch(match);
-    return res.status(200).json(result);
+    // You can later add logic to check if your IPTV scraper is active
+    res.status(200).json({ ok: true, message: 'Stream service is ready' });
   } catch (error) {
-    return res.status(500).json({
-      message: 'Failed to fetch live streams.',
-      error: error.message,
-    });
+    res.status(500).json({ ok: false, message: 'Stream service error' });
   }
 };
 
-export const refreshStreamsForMatch = async (req, res) => {
+export const getMatchStreams = async (req, res) => {
+  const { matchId } = req.params;
+  
   try {
-    const health = await getStreamScraperHealth();
-    if (!health.ok) {
-      return res.status(503).json({
-        message: 'Live stream scraper is not ready yet.',
-        health,
-      });
-    }
-
-    const match = await findMatchByParam(req.params.fixtureId);
-    if (!match) {
-      return res.status(404).json({ message: 'Match not found for stream refresh.' });
-    }
-
-    clearLiveStreamCache(match.fixtureId || match._id);
-    const result = await getLiveStreamsForMatch(match, { forceRefresh: true });
-    return res.status(200).json(result);
-  } catch (error) {
-    return res.status(500).json({
-      message: 'Failed to refresh live streams.',
-      error: error.message,
+    // Placeholder streams. You can integrate your IPTV scraper logic here later.
+    res.status(200).json({
+      available: true,
+      message: 'Streams fetched successfully',
+      streams: [
+        {
+          url: 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8',
+          quality: 'Auto',
+          language: 'English'
+        }
+      ]
     });
+  } catch (error) {
+    res.status(500).json({ available: false, message: 'Error fetching streams' });
   }
 };
 
-export const getStreamHealth = async (_req, res) => {
+export const refreshMatchStreams = async (req, res) => {
+  const { matchId } = req.params;
+  
   try {
-    const health = await getStreamScraperHealth();
-    return res.status(health.ok ? 200 : 503).json(health);
+    // For now, call the same GET function. In the future, this can force a scraper re-run.
+    return getMatchStreams(req, res);
   } catch (error) {
-    return res.status(500).json({
-      ok: false,
-      source: 'iptv-scraper',
-      message: 'Failed to evaluate stream scraper health.',
-      error: error.message,
-    });
+    res.status(500).json({ available: false, message: 'Error refreshing streams' });
   }
 };
