@@ -45,11 +45,13 @@ export const getMatchStreams = async (req, res) => {
     // __dirname ব্যবহার করে একেবারে সঠিক Absolute Path তৈরি করা হলো
     const pythonScriptPath = path.join(__dirname, '../../IPTV-SCRAPPER-main (1)/IPTV-SCRAPPER-main/iptv_scraper/cli.py');
     
+    console.log("🔍 Checking Python Scraper at:", pythonScriptPath);
+
     // স্ক্রিপ্ট না পেলে ডামি লিংক না দেখিয়ে এরর দেখাবে
     if (!fs.existsSync(pythonScriptPath)) {
       return res.status(200).json({
         available: false,
-        message: 'Python scraper is missing on the server.',
+        message: `Scraper missing! Node.js is looking exactly here: ${pythonScriptPath}`,
         streams: []
       });
     }
@@ -60,6 +62,12 @@ export const getMatchStreams = async (req, res) => {
     console.log(`📡 Fetching live stream: ${command}`);
 
     exec(command, { timeout: 60000 }, (error, stdout, stderr) => {
+      if (error) {
+        console.error("❌ Python Execution Error:", error.message);
+        console.error("❌ Stderr:", stderr);
+        return res.status(500).json({ available: false, message: 'Python script failed to run. Check backend console.' });
+      }
+
       // পাইথনের আউটপুট থেকে .m3u8 বা .ts লিংগুলো এক্সট্রাক্ট করা
       const urlRegex = /(https?:\/\/[^\s]+(?:\.m3u8|\.ts)[^\s]*)/g;
       const foundLinks = [];
