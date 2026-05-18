@@ -14,6 +14,7 @@ import playerRoutes from './routes/playerRoutes.js';
 import teamRoutes from './routes/teamRoutes.js';
 import roomRoutes from './routes/roomRoutes.js';
 import leaderboardRoutes from './routes/leaderboardRoutes.js';
+import streamRoutes from './routes/streamRoutes.js';
 import { fetchAndSaveLiveMatches } from './services/liveMatchService.js';
 
 
@@ -49,6 +50,7 @@ app.use('/api/players', playerRoutes);
 app.use('/api/teams', teamRoutes);
 app.use('/api/rooms', roomRoutes);
 app.use('/api/leaderboard', leaderboardRoutes);
+app.use('/api/streams', streamRoutes);
 
 // বেসিক টেস্টিং রাউট
 app.get('/', (req, res) => {
