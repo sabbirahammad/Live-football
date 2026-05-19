@@ -24,6 +24,7 @@ const STREAM_VALIDATION_TIMEOUT_MS = Number(process.env.IPTV_STREAM_VALIDATION_T
 const MAX_VALIDATE_STREAMS = Number(process.env.IPTV_MAX_VALIDATE_STREAMS || 2);
 const PREFETCH_REFRESH_LIVE_AFTER_MS = Number(process.env.IPTV_PREFETCH_REFRESH_LIVE_AFTER_MS || 120000);
 const HEALTH_CACHE_TTL_MS = Number(process.env.IPTV_HEALTH_CACHE_TTL_MS || 60000);
+const EMPTY_STREAM_CACHE_TTL_MS = Number(process.env.IPTV_EMPTY_STREAM_CACHE_TTL_MS || 15000);
 
 const streamCache = new Map();
 const inFlightStreamLookups = new Map();
@@ -520,6 +521,19 @@ const getCachedStreams = (cacheKey) => {
   return cached;
 };
 
+const shouldUseCachedResponse = (match, cached) => {
+  if (!cached) return false;
+  if (cached.streamCount > 0) return true;
+
+  const ageMs = Date.now() - Number(cached.cachedAt || 0);
+
+  if (match.status === 'Live') {
+    return ageMs < EMPTY_STREAM_CACHE_TTL_MS;
+  }
+
+  return ageMs < Math.min(STREAM_CACHE_TTL, EMPTY_STREAM_CACHE_TTL_MS);
+};
+
 const getPersistentCachedStreams = async (cacheKey) => {
   const record = await StreamCache.findOne({
     fixtureKey: cacheKey,
@@ -531,7 +545,8 @@ const getPersistentCachedStreams = async (cacheKey) => {
 
 const saveStreamsToPersistentCache = async (cacheKey, response) => {
   const cachedAtDate = new Date(response.cachedAt || Date.now());
-  const expiresAt = new Date(cachedAtDate.getTime() + STREAM_CACHE_TTL);
+  const ttlMs = response.streamCount > 0 ? STREAM_CACHE_TTL : EMPTY_STREAM_CACHE_TTL_MS;
+  const expiresAt = new Date(cachedAtDate.getTime() + ttlMs);
 
   const payload = {
     fixtureKey: cacheKey,
@@ -618,7 +633,7 @@ export const getLiveStreamsForMatch = async (match, options = {}) => {
   const fixtureKey = String(match.fixtureId || match._id);
   const cached = !options.forceRefresh ? getCachedStreams(fixtureKey) : null;
 
-  if (cached) {
+  if (shouldUseCachedResponse(match, cached)) {
     return {
       ...cached,
       cached: true,
@@ -627,7 +642,7 @@ export const getLiveStreamsForMatch = async (match, options = {}) => {
   }
 
   const dbCached = !options.forceRefresh ? await getPersistentCachedStreams(fixtureKey) : null;
-  if (dbCached) {
+  if (shouldUseCachedResponse(match, dbCached)) {
     streamCache.set(fixtureKey, dbCached);
     return {
       ...dbCached,
@@ -712,7 +727,9 @@ export const getLiveStreamsForMatch = async (match, options = {}) => {
           : 'Scraper completed but no stream was found.',
     };
 
-    streamCache.set(fixtureKey, response);
+    if (response.streamCount > 0 || match.status !== 'Live') {
+      streamCache.set(fixtureKey, response);
+    }
     await saveStreamsToPersistentCache(fixtureKey, response);
     return response;
   })();
