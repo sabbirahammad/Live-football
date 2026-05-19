@@ -72,6 +72,19 @@ const dedupeStreams = (streams) => {
 
 const getFixtureKey = (matchOrId) => String(matchOrId?.fixtureId || matchOrId?._id || matchOrId);
 
+const getEffectiveMatchStatus = (match) => {
+  if (match?.status === 'Live' || match?.status === 'Finished') return match.status;
+
+  const kickoffMs = new Date(match?.matchTime).getTime();
+  const ageMs = Date.now() - kickoffMs;
+
+  if (Number.isFinite(kickoffMs) && ageMs >= 0 && ageMs <= 4 * 60 * 60 * 1000) {
+    return 'Live';
+  }
+
+  return match?.status || 'Upcoming';
+};
+
 const getStreamDomain = (url) => {
   try {
     return new URL(url).hostname.toLowerCase();
@@ -526,8 +539,9 @@ const shouldUseCachedResponse = (match, cached) => {
   if (cached.streamCount > 0) return true;
 
   const ageMs = Date.now() - Number(cached.cachedAt || 0);
+  const effectiveStatus = getEffectiveMatchStatus(match);
 
-  if (match.status === 'Live') {
+  if (effectiveStatus === 'Live') {
     return ageMs < EMPTY_STREAM_CACHE_TTL_MS;
   }
 
@@ -578,12 +592,14 @@ const saveStreamsToPersistentCache = async (cacheKey, response) => {
 };
 
 export const getLiveStreamsForMatch = async (match, options = {}) => {
-  if (match.status === 'Finished') {
+  const effectiveStatus = getEffectiveMatchStatus(match);
+
+  if (effectiveStatus === 'Finished') {
     return {
       fixtureId: match.fixtureId || null,
       matchId: String(match._id),
       matchLabel: `${match.homeTeam} vs ${match.awayTeam}`,
-      status: match.status,
+      status: effectiveStatus,
       league: match.league,
       available: false,
       source: 'iptv-scraper',
@@ -604,12 +620,12 @@ export const getLiveStreamsForMatch = async (match, options = {}) => {
     };
   }
 
-  if (match.status !== 'Live' && !isPriorityMatch(match)) {
+  if (effectiveStatus !== 'Live' && !isPriorityMatch(match)) {
     return {
       fixtureId: match.fixtureId || null,
       matchId: String(match._id),
       matchLabel: `${match.homeTeam} vs ${match.awayTeam}`,
-      status: match.status,
+      status: effectiveStatus,
       league: match.league,
       available: false,
       source: 'iptv-scraper',
@@ -700,7 +716,7 @@ export const getLiveStreamsForMatch = async (match, options = {}) => {
       fixtureId: match.fixtureId || null,
       matchId: String(match._id),
       matchLabel: `${match.homeTeam} vs ${match.awayTeam}`,
-      status: match.status,
+      status: effectiveStatus,
       league: match.league,
       available: streams.length > 0,
       source: 'iptv-scraper',
@@ -727,7 +743,7 @@ export const getLiveStreamsForMatch = async (match, options = {}) => {
           : 'Scraper completed but no stream was found.',
     };
 
-    if (response.streamCount > 0 || match.status !== 'Live') {
+    if (response.streamCount > 0 || effectiveStatus !== 'Live') {
       streamCache.set(fixtureKey, response);
     }
     await saveStreamsToPersistentCache(fixtureKey, response);

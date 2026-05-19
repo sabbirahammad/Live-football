@@ -156,15 +156,13 @@ io.on("connection", (socket) => {
   });
 });
 
-// Auto-fetch live matches every 15 minutes to stay within 100 requests/day limit
-// 15 mins = 15 * 60 * 1000 = 900000 ms
-// ⚠️ DEVELOPMENT-এর জন্য এটি কমেন্ট করে রাখা হলো, যেন API Limit শেষ না হয়
+const MATCH_SYNC_INTERVAL_MS = Number(process.env.MATCH_SYNC_INTERVAL_MS || 120000);
 const shouldAutoSyncMatches = process.env.ENABLE_MATCH_SYNC !== 'false' && !!process.env.FOOTBALL_API_KEY;
 
 if (shouldAutoSyncMatches) {
   setInterval(() => {
     fetchAndSaveLiveMatches(io);
-  }, 900000);
+  }, MATCH_SYNC_INTERVAL_MS);
 
   fetchAndSaveLiveMatches(io);
 } else {
