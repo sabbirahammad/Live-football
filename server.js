@@ -16,6 +16,7 @@ import roomRoutes from './routes/roomRoutes.js';
 import leaderboardRoutes from './routes/leaderboardRoutes.js';
 import streamRoutes from './routes/streamRoutes.js';
 import { fetchAndSaveLiveMatches } from './services/liveMatchService.js';
+import { startStreamPrefetchLoop } from './services/streamScraperService.js';
 
 
 // Environment variables লোড করা
@@ -169,6 +170,8 @@ if (shouldAutoSyncMatches) {
 } else {
   console.log('Match auto-sync disabled. Set FOOTBALL_API_KEY and keep ENABLE_MATCH_SYNC not false to enable it.');
 }
+
+startStreamPrefetchLoop();
 
 // ⏰ Weekly Leaderboard Cron Job (প্রতি রবিবার রাত ১২ টায় চলবে)
 cron.schedule('0 0 * * 0', async () => {

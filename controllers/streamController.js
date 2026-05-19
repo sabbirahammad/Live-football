@@ -89,7 +89,7 @@ export const refreshMatchStreams = async (req, res) => {
       });
     }
 
-    clearLiveStreamCache(match.fixtureId || match._id);
+    await clearLiveStreamCache(match.fixtureId || match._id);
     const result = await getLiveStreamsForMatch(match, { forceRefresh: true });
     return res.status(200).json(result);
   } catch (error) {
@@ -99,5 +99,26 @@ export const refreshMatchStreams = async (req, res) => {
       error: error.message,
       streams: [],
     });
+  }
+};
+
+export const reportStreamTelemetry = async (req, res) => {
+  try {
+    const { matchId, url, success, errorMsg } = req.body;
+    if (!url) {
+      return res.status(400).json({ ok: false, message: 'URL is required' });
+    }
+
+    console.log(`[Telemetry] Stream ${success ? 'SUCCESS' : 'FAILED'} | Match: ${matchId || 'N/A'} | URL: ${url}`);
+    if (!success) {
+      console.log(`[Telemetry] Reason: ${errorMsg}`);
+    }
+
+    // Phase 4: Here we can import StreamDomainHealth and update domain stats directly 
+    // based on real client playback telemetry.
+
+    return res.status(200).json({ ok: true });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message });
   }
 };
