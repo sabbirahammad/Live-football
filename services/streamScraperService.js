@@ -11,8 +11,9 @@ const DEFAULT_SCRAPER_DIR = path.join(backendRoot, 'tools', 'iptv-scraper');
 const CACHE_DIR = path.join(backendRoot, '.stream-cache');
 const STREAM_CACHE_TTL = 5 * 60 * 1000;
 const MAX_STREAMS = Number(process.env.IPTV_STREAM_MAX_STREAMS || 6);
-const MAX_SEARCH_TERMS = Number(process.env.IPTV_STREAM_MAX_SEARCH_TERMS || 3);
-const SCRAPER_TIMEOUT_MS = Number(process.env.IPTV_SCRAPER_TIMEOUT_MS || 120000);
+const MAX_SEARCH_TERMS = Number(process.env.IPTV_STREAM_MAX_SEARCH_TERMS || 2);
+const SCRAPER_TIMEOUT_MS = Number(process.env.IPTV_SCRAPER_TIMEOUT_MS || 25000);
+const TOTAL_SCRAPE_TIMEOUT_MS = Number(process.env.IPTV_TOTAL_SCRAPE_TIMEOUT_MS || 40000);
 const HEALTH_CHECK_TIMEOUT = 20 * 1000;
 
 const streamCache = new Map();
@@ -352,8 +353,17 @@ export const getLiveStreamsForMatch = async (match, options = {}) => {
   let matchedSearchTerm = null;
   let runtime = null;
   const errors = [];
+  const startedAt = Date.now();
 
   for (const searchTerm of searchTerms) {
+    if (Date.now() - startedAt >= TOTAL_SCRAPE_TIMEOUT_MS) {
+      errors.push({
+        searchTerm,
+        message: `Overall stream lookup timed out after ${TOTAL_SCRAPE_TIMEOUT_MS}ms`,
+      });
+      break;
+    }
+
     try {
       const result = await runScraperForTerm({ searchTerm, outputName });
       if (result.streams.length > 0) {
@@ -387,7 +397,7 @@ export const getLiveStreamsForMatch = async (match, options = {}) => {
     message: streams.length > 0
       ? 'Live streams fetched successfully.'
       : errors.length > 0
-        ? 'No stream found from scraper sources.'
+        ? 'Stream lookup timed out or no source returned a working link yet.'
         : 'Scraper completed but no stream was found.',
   };
 
