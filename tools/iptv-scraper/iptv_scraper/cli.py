@@ -688,6 +688,8 @@ class IPTVScraper:
             'https://pl.yalllashoot.today/albaplayer/',
             'https://yalllashoot.today/albaplayer/',
             'https://www.alkoora.live/albaplayer/',
+            'https://yalla-shoot.io/albaplayer/',
+            'https://yalla-shoot-7asry.com/albaplayer/',
         ]
         
         # Common channel endpoints on albaplayer
@@ -759,19 +761,20 @@ class IPTVScraper:
         
         # Match streaming aggregator sites
         match_sites = [
-            'https://c.sia.watch/premium-1/',
-            'https://c.sia.watch/premium-2/',
-            'https://reddits.soccerstreams.net/',
+            'https://thestreameast.to/',
+            'https://streameast.app/',
+            'https://sportsurge.club/',
             'https://v2.sportsurge.net/',
-            'https://streameast.io/',
-            'https://sportshub.stream/',
-            'https://streamsgate.tv/',
-            'https://socceronline.me/',
-            'https://reddistreams.com/',
+            'https://buffstreams.sx/',
             'https://buffstreams.app/',
-            'https://crackstreams.com/',
+            'https://yalla-shoot.io/',
+            'https://yalla-shoot-7asry.com/',
+            'https://reddit1.soccerstreams.net/',
+            'https://www.totalsportek.to/',
+            'https://www.vipleague.st/',
+            'https://sportshub.stream/',
+            'https://socceronline.me/',
             'https://nflbite.com/',
-            'https://nbabite.com/',
             'https://mlbshow.com/',
             # Albaplayer platforms
             'https://aaaaaaa.alkoora.live/',
