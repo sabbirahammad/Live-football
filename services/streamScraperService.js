@@ -15,18 +15,22 @@ const CACHE_DIR = path.join(backendRoot, '.stream-cache');
 const STREAM_CACHE_TTL = 5 * 60 * 1000;
 const MAX_STREAMS = Number(process.env.IPTV_STREAM_MAX_STREAMS || 6);
 const MAX_SEARCH_TERMS = Number(process.env.IPTV_STREAM_MAX_SEARCH_TERMS || 2);
-const SCRAPER_TIMEOUT_MS = Number(process.env.IPTV_SCRAPER_TIMEOUT_MS || 25000);
-const TOTAL_SCRAPE_TIMEOUT_MS = Number(process.env.IPTV_TOTAL_SCRAPE_TIMEOUT_MS || 40000);
+const SCRAPER_TIMEOUT_MS = Number(process.env.IPTV_SCRAPER_TIMEOUT_MS || 12000);
+const TOTAL_SCRAPE_TIMEOUT_MS = Number(process.env.IPTV_TOTAL_SCRAPE_TIMEOUT_MS || 25000);
 const HEALTH_CHECK_TIMEOUT = 20 * 1000;
 const PREFETCH_INTERVAL_MS = Number(process.env.IPTV_PREFETCH_INTERVAL_MS || 180000);
 const PREFETCH_MATCH_LIMIT = Number(process.env.IPTV_PREFETCH_MATCH_LIMIT || 6);
-const STREAM_VALIDATION_TIMEOUT_MS = Number(process.env.IPTV_STREAM_VALIDATION_TIMEOUT_MS || 5000);
-const MAX_VALIDATE_STREAMS = Number(process.env.IPTV_MAX_VALIDATE_STREAMS || 3);
+const STREAM_VALIDATION_TIMEOUT_MS = Number(process.env.IPTV_STREAM_VALIDATION_TIMEOUT_MS || 2500);
+const MAX_VALIDATE_STREAMS = Number(process.env.IPTV_MAX_VALIDATE_STREAMS || 2);
 const PREFETCH_REFRESH_LIVE_AFTER_MS = Number(process.env.IPTV_PREFETCH_REFRESH_LIVE_AFTER_MS || 120000);
+const HEALTH_CACHE_TTL_MS = Number(process.env.IPTV_HEALTH_CACHE_TTL_MS || 60000);
 
 const streamCache = new Map();
+const inFlightStreamLookups = new Map();
 let prefetchIntervalHandle = null;
 let prefetchInFlight = false;
+let cachedHealthSnapshot = null;
+let cachedHealthAt = 0;
 const PRIORITY_LEAGUE_HINTS = [
   'premier league',
   'uefa',
@@ -632,79 +636,94 @@ export const getLiveStreamsForMatch = async (match, options = {}) => {
     };
   }
 
-  const searchTerms = buildSearchTerms(match);
-  const outputName = `${safeSlug(match.homeTeam)}-vs-${safeSlug(match.awayTeam)}`;
-  let streams = [];
-  let matchedSearchTerm = null;
-  let runtime = null;
-  const errors = [];
-  const startedAt = Date.now();
-  const attemptedTerms = [];
-
-  for (const searchTerm of searchTerms) {
-    if (Date.now() - startedAt >= TOTAL_SCRAPE_TIMEOUT_MS) {
-      errors.push({
-        searchTerm,
-        message: `Overall stream lookup timed out after ${TOTAL_SCRAPE_TIMEOUT_MS}ms`,
-      });
-      break;
-    }
-
-    try {
-      attemptedTerms.push(searchTerm);
-      console.log(`[stream-scraper] Trying "${searchTerm}" for ${match.homeTeam} vs ${match.awayTeam}`);
-      const result = await runScraperForTerm({ searchTerm, outputName });
-      if (result.streams.length > 0) {
-        streams = result.streams;
-        matchedSearchTerm = searchTerm;
-        runtime = result.pythonCommand;
-        break;
-      }
-    } catch (error) {
-      errors.push({ searchTerm, message: error.message });
-    }
+  const existingLookup = !options.forceRefresh ? inFlightStreamLookups.get(fixtureKey) : null;
+  if (existingLookup) {
+    return existingLookup;
   }
 
-  const validatedSummary = {
-    checkedCount: streams.filter((stream) => stream.isValidated).length,
-    aliveCount: streams.filter((stream) => stream.isAlive === true).length,
-    failedCount: streams.filter((stream) => stream.isAlive === false).length,
-  };
+  const lookupPromise = (async () => {
+    const searchTerms = buildSearchTerms(match);
+    const outputName = `${safeSlug(match.homeTeam)}-vs-${safeSlug(match.awayTeam)}`;
+    let streams = [];
+    let matchedSearchTerm = null;
+    let runtime = null;
+    const errors = [];
+    const startedAt = Date.now();
+    const attemptedTerms = [];
 
-  const response = {
-    fixtureId: match.fixtureId || null,
-    matchId: String(match._id),
-    matchLabel: `${match.homeTeam} vs ${match.awayTeam}`,
-    status: match.status,
-    league: match.league,
-    available: streams.length > 0,
-    source: 'iptv-scraper',
-    searchedTerms: searchTerms,
-    matchedSearchTerm,
-    streams,
-    streamCount: streams.length,
-    state: streams.length > 0 ? 'ready' : 'empty',
-    cached: false,
-    cachedAt: Date.now(),
-    runtime,
-    errors,
-    diagnostics: {
-      skipped: false,
-      attemptedTerms,
-      durationMs: Date.now() - startedAt,
-      priorityMatch: isPriorityMatch(match),
-      validation: validatedSummary,
-    },
-    message: streams.length > 0
-      ? 'Live streams fetched successfully.'
-      : errors.length > 0
-        ? 'Stream lookup timed out or no source returned a working link yet.'
-        : 'Scraper completed but no stream was found.',
-  };
+    for (const searchTerm of searchTerms) {
+      if (Date.now() - startedAt >= TOTAL_SCRAPE_TIMEOUT_MS) {
+        errors.push({
+          searchTerm,
+          message: `Overall stream lookup timed out after ${TOTAL_SCRAPE_TIMEOUT_MS}ms`,
+        });
+        break;
+      }
 
-  streamCache.set(fixtureKey, response);
-  await saveStreamsToPersistentCache(fixtureKey, response);
-  return response;
+      try {
+        attemptedTerms.push(searchTerm);
+        console.log(`[stream-scraper] Trying "${searchTerm}" for ${match.homeTeam} vs ${match.awayTeam}`);
+        const result = await runScraperForTerm({ searchTerm, outputName });
+        if (result.streams.length > 0) {
+          streams = result.streams;
+          matchedSearchTerm = searchTerm;
+          runtime = result.pythonCommand;
+          break;
+        }
+      } catch (error) {
+        errors.push({ searchTerm, message: error.message });
+      }
+    }
+
+    const validatedSummary = {
+      checkedCount: streams.filter((stream) => stream.isValidated).length,
+      aliveCount: streams.filter((stream) => stream.isAlive === true).length,
+      failedCount: streams.filter((stream) => stream.isAlive === false).length,
+    };
+
+    const response = {
+      fixtureId: match.fixtureId || null,
+      matchId: String(match._id),
+      matchLabel: `${match.homeTeam} vs ${match.awayTeam}`,
+      status: match.status,
+      league: match.league,
+      available: streams.length > 0,
+      source: 'iptv-scraper',
+      searchedTerms: searchTerms,
+      matchedSearchTerm,
+      streams,
+      streamCount: streams.length,
+      state: streams.length > 0 ? 'ready' : 'empty',
+      cached: false,
+      cachedAt: Date.now(),
+      runtime,
+      errors,
+      diagnostics: {
+        skipped: false,
+        attemptedTerms,
+        durationMs: Date.now() - startedAt,
+        priorityMatch: isPriorityMatch(match),
+        validation: validatedSummary,
+      },
+      message: streams.length > 0
+        ? 'Live streams fetched successfully.'
+        : errors.length > 0
+          ? 'Stream lookup timed out or no source returned a working link yet.'
+          : 'Scraper completed but no stream was found.',
+    };
+
+    streamCache.set(fixtureKey, response);
+    await saveStreamsToPersistentCache(fixtureKey, response);
+    return response;
+  })();
+
+  inFlightStreamLookups.set(fixtureKey, lookupPromise);
+
+  try {
+    return await lookupPromise;
+  } finally {
+    inFlightStreamLookups.delete(fixtureKey);
+  }
 };
 
 export const clearLiveStreamCache = (fixtureId) => {
@@ -719,6 +738,10 @@ export const clearLiveStreamCache = (fixtureId) => {
 };
 
 export const getStreamScraperHealth = async () => {
+  if (cachedHealthSnapshot && (Date.now() - cachedHealthAt) < HEALTH_CACHE_TTL_MS) {
+    return cachedHealthSnapshot;
+  }
+
   const candidates = getPythonCandidates();
   let pythonCommand = null;
   let pythonVersion = null;
@@ -823,7 +846,7 @@ export const getStreamScraperHealth = async () => {
     }
   }
 
-  return {
+  const response = {
     ok: scraperAccessible && !!pythonCommand && dependenciesInstalled && cliRunnable,
     source: 'iptv-scraper',
     scraperAccessible,
@@ -833,6 +856,10 @@ export const getStreamScraperHealth = async () => {
     cliRunnable,
     checks,
   };
+
+  cachedHealthSnapshot = response;
+  cachedHealthAt = Date.now();
+  return response;
 };
 
 const getPrefetchCandidates = async () => {
