@@ -1,12 +1,10 @@
-import { exec } from 'child_process';
-import path from 'path';
-import fs from 'fs';
 import mongoose from 'mongoose';
 import Match from '../models/Match.js';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import {
+  clearLiveStreamCache,
+  getLiveStreamsForMatch,
+  getStreamScraperHealth,
+} from '../services/streamScraperService.js';
 
 const resolveMatchFromParam = async (matchId) => {
   const rawMatchId = String(matchId || '').trim();
@@ -23,81 +21,83 @@ const resolveMatchFromParam = async (matchId) => {
   return match;
 };
 
-export const checkStreamHealth = async (req, res) => {
+export const checkStreamHealth = async (_req, res) => {
   try {
-    // You can later add logic to check if your IPTV scraper is active
-    res.status(200).json({ ok: true, message: 'Stream service is ready' });
+    const health = await getStreamScraperHealth();
+    return res.status(health.ok ? 200 : 503).json(health);
   } catch (error) {
-    res.status(500).json({ ok: false, message: 'Stream service error' });
+    return res.status(500).json({
+      ok: false,
+      source: 'iptv-scraper',
+      message: 'Failed to evaluate stream scraper health.',
+      error: error.message,
+    });
   }
 };
 
 export const getMatchStreams = async (req, res) => {
-  const { matchId } = req.params;
-  
   try {
-    const match = await resolveMatchFromParam(matchId);
-
-    if (!match) {
-      return res.status(404).json({ available: false, message: 'Match not found' });
-    }
-
-    // __dirname ব্যবহার করে একেবারে সঠিক Absolute Path তৈরি করা হলো
-    const pythonScriptPath = path.join(__dirname, '../../IPTV-SCRAPPER-main (1)/IPTV-SCRAPPER-main/iptv_scraper/cli.py');
-    
-    console.log("🔍 Checking Python Scraper at:", pythonScriptPath);
-
-    // স্ক্রিপ্ট না পেলে ডামি লিংক না দেখিয়ে এরর দেখাবে
-    if (!fs.existsSync(pythonScriptPath)) {
-      return res.status(200).json({
+    const health = await getStreamScraperHealth();
+    if (!health.ok) {
+      return res.status(503).json({
         available: false,
-        message: `Scraper missing! Node.js is looking exactly here: ${pythonScriptPath}`,
-        streams: []
+        message: 'Live stream scraper is not ready yet.',
+        health,
+        streams: [],
       });
     }
 
-    const searchTeam = match.homeTeam; 
-    // Command: python cli.py --live-match -c "TeamName" -n 2
-    const command = `python "${pythonScriptPath}" --live-match -c "${searchTeam}" -n 2`;
-    console.log(`📡 Fetching live stream: ${command}`);
+    const match = await resolveMatchFromParam(req.params.matchId);
+    if (!match) {
+      return res.status(404).json({
+        available: false,
+        message: 'Match not found for stream lookup.',
+        streams: [],
+      });
+    }
 
-    exec(command, { timeout: 60000 }, (error, stdout, stderr) => {
-      if (error) {
-        console.error("❌ Python Execution Error:", error.message);
-        console.error("❌ Stderr:", stderr);
-        return res.status(500).json({ available: false, message: 'Python script failed to run. Check backend console.' });
-      }
-
-      // পাইথনের আউটপুট থেকে .m3u8 বা .ts লিংগুলো এক্সট্রাক্ট করা
-      const urlRegex = /(https?:\/\/[^\s]+(?:\.m3u8|\.ts)[^\s]*)/g;
-      const foundLinks = [];
-      let urlMatch;
-      
-      while ((urlMatch = urlRegex.exec(stdout)) !== null) {
-        foundLinks.push(urlMatch[0]);
-      }
-
-      const uniqueLinks = [...new Set(foundLinks)];
-      if (uniqueLinks.length > 0) {
-        const streams = uniqueLinks.map((url, index) => ({ url: url, quality: 'Auto', language: `Live Stream ${index + 1}` }));
-        return res.status(200).json({ available: true, message: 'Streams fetched successfully', streams });
-      } else {
-        return res.status(200).json({ available: false, message: 'No live streams found right now. Try again at kick-off.', streams: [] });
-      }
-    });
+    const result = await getLiveStreamsForMatch(match);
+    return res.status(200).json(result);
   } catch (error) {
-    console.error("Stream error details:", error);
-    res.status(500).json({ available: false, message: 'Error fetching streams' });
+    return res.status(500).json({
+      available: false,
+      message: 'Failed to fetch live streams.',
+      error: error.message,
+      streams: [],
+    });
   }
 };
 
 export const refreshMatchStreams = async (req, res) => {
-  const { matchId } = req.params;
-  
   try {
-    // For now, call the same GET function. In the future, this can force a scraper re-run.
-    return getMatchStreams(req, res);
+    const health = await getStreamScraperHealth();
+    if (!health.ok) {
+      return res.status(503).json({
+        available: false,
+        message: 'Live stream scraper is not ready yet.',
+        health,
+        streams: [],
+      });
+    }
+
+    const match = await resolveMatchFromParam(req.params.matchId);
+    if (!match) {
+      return res.status(404).json({
+        available: false,
+        message: 'Match not found for stream refresh.',
+        streams: [],
+      });
+    }
+
+    clearLiveStreamCache(match.fixtureId || match._id);
+    const result = await getLiveStreamsForMatch(match, { forceRefresh: true });
+    return res.status(200).json(result);
   } catch (error) {
-    res.status(500).json({ available: false, message: 'Error refreshing streams' });
+    return res.status(500).json({
+      available: false,
+      message: 'Failed to refresh live streams.',
+      error: error.message,
+      streams: [],
+    });
   }
 };
