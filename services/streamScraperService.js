@@ -37,13 +37,77 @@ const dedupeStreams = (streams) => {
   return uniqueStreams;
 };
 
+const getStreamScore = (stream) => {
+  const title = String(stream?.title || '').toLowerCase();
+  const url = String(stream?.url || '').toLowerCase();
+  let score = 0;
+
+  if (title.includes('bein')) score += 12;
+  if (title.includes('sky')) score += 10;
+  if (title.includes('espn')) score += 10;
+  if (title.includes('dazn')) score += 10;
+  if (title.includes('sport')) score += 8;
+  if (title.includes('live')) score += 4;
+  if (title.includes('hd')) score += 3;
+
+  if (url.includes('.m3u8')) score += 5;
+  if (url.includes('/hls/')) score += 4;
+  if (url.includes('/live/')) score += 4;
+  if (url.includes('albaplayer')) score += 3;
+  if (url.includes('yallla') || url.includes('yalla')) score += 2;
+
+  if (url.startsWith('https://')) score += 1;
+
+  return score;
+};
+
+const rankStreams = (streams) =>
+  [...streams]
+    .map((stream) => ({
+      ...stream,
+      rankScore: getStreamScore(stream),
+    }))
+    .sort((a, b) => b.rankScore - a.rankScore)
+    .slice(0, MAX_STREAMS);
+
+const normalizeSearchValue = (value) =>
+  String(value || '')
+    .replace(/\bFC\b/gi, '')
+    .replace(/\bCF\b/gi, '')
+    .replace(/\bSC\b/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const getMatchDayHints = (match) => {
+  if (!match?.matchTime) return [];
+
+  const now = new Date();
+  const matchDate = new Date(match.matchTime);
+  const diffMs = matchDate.getTime() - now.getTime();
+  const diffHours = diffMs / (1000 * 60 * 60);
+
+  if (diffHours > -8 && diffHours < 8) return ['today'];
+  if (diffHours >= 8 && diffHours < 32) return ['tomorrow'];
+  return [];
+};
+
 const buildSearchTerms = (match) => {
+  const homeTeam = normalizeSearchValue(match.homeTeam);
+  const awayTeam = normalizeSearchValue(match.awayTeam);
+  const league = normalizeSearchValue(match.league);
+  const dayHints = getMatchDayHints(match);
+
   const rawTerms = [
-    `${match.homeTeam} vs ${match.awayTeam}`,
-    `${match.homeTeam} ${match.awayTeam}`,
-    `${match.league} ${match.homeTeam}`,
-    `${match.league} ${match.awayTeam}`,
-    match.league,
+    `${homeTeam} vs ${awayTeam}`,
+    `${homeTeam} ${awayTeam}`,
+    `${league} ${homeTeam} ${awayTeam}`,
+    `${league} ${homeTeam}`,
+    `${league} ${awayTeam}`,
+    ...dayHints.map((hint) => `${hint} ${homeTeam} vs ${awayTeam}`),
+    ...dayHints.map((hint) => `${hint} ${league}`),
+    homeTeam,
+    awayTeam,
+    league,
   ];
 
   return rawTerms
@@ -125,7 +189,7 @@ const parseGeneratedStreams = async (runDir, sourceLabel) => {
     })
   );
 
-  return dedupeStreams(parsedGroups.flat()).slice(0, MAX_STREAMS);
+  return rankStreams(dedupeStreams(parsedGroups.flat()));
 };
 
 const runCommand = ({ command, args, cwd, env, timeoutMs }) =>
@@ -249,7 +313,7 @@ const getCachedStreams = (cacheKey) => {
 };
 
 export const getLiveStreamsForMatch = async (match, options = {}) => {
-  if (match.status !== 'Live') {
+  if (match.status === 'Finished') {
     return {
       fixtureId: match.fixtureId || null,
       matchId: String(match._id),
@@ -262,12 +326,12 @@ export const getLiveStreamsForMatch = async (match, options = {}) => {
       matchedSearchTerm: null,
       streams: [],
       streamCount: 0,
-      state: 'not_live',
+      state: 'finished',
       cached: false,
       cachedAt: Date.now(),
       runtime: null,
       errors: [],
-      message: 'Streams are fetched only for matches currently marked Live.',
+      message: 'Streams are not fetched for finished matches.',
     };
   }
 
