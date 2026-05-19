@@ -17,6 +17,23 @@ const TOTAL_SCRAPE_TIMEOUT_MS = Number(process.env.IPTV_TOTAL_SCRAPE_TIMEOUT_MS 
 const HEALTH_CHECK_TIMEOUT = 20 * 1000;
 
 const streamCache = new Map();
+const PRIORITY_LEAGUE_HINTS = [
+  'premier league',
+  'uefa',
+  'champions league',
+  'la liga',
+  'laliga',
+  'serie a',
+  'bundesliga',
+  'ligue 1',
+  'europa',
+  'fa cup',
+  'copa del rey',
+  'super cup',
+  'world cup',
+  'euro',
+  'mls',
+];
 
 const safeSlug = (value) =>
   String(value || 'match')
@@ -90,6 +107,13 @@ const getMatchDayHints = (match) => {
   if (diffHours > -8 && diffHours < 8) return ['today'];
   if (diffHours >= 8 && diffHours < 32) return ['tomorrow'];
   return [];
+};
+
+const isPriorityMatch = (match) => {
+  const league = normalizeSearchValue(match?.league).toLowerCase();
+  const teamsText = `${normalizeSearchValue(match?.homeTeam)} ${normalizeSearchValue(match?.awayTeam)}`.toLowerCase();
+
+  return PRIORITY_LEAGUE_HINTS.some((hint) => league.includes(hint) || teamsText.includes(hint));
 };
 
 const buildSearchTerms = (match) => {
@@ -332,7 +356,37 @@ export const getLiveStreamsForMatch = async (match, options = {}) => {
       cachedAt: Date.now(),
       runtime: null,
       errors: [],
+      diagnostics: {
+        skipped: true,
+        reason: 'finished_match',
+      },
       message: 'Streams are not fetched for finished matches.',
+    };
+  }
+
+  if (match.status !== 'Live' && !isPriorityMatch(match)) {
+    return {
+      fixtureId: match.fixtureId || null,
+      matchId: String(match._id),
+      matchLabel: `${match.homeTeam} vs ${match.awayTeam}`,
+      status: match.status,
+      league: match.league,
+      available: false,
+      source: 'iptv-scraper',
+      searchedTerms: [],
+      matchedSearchTerm: null,
+      streams: [],
+      streamCount: 0,
+      state: 'skipped_low_priority',
+      cached: false,
+      cachedAt: Date.now(),
+      runtime: null,
+      errors: [],
+      diagnostics: {
+        skipped: true,
+        reason: 'low_priority_upcoming_match',
+      },
+      message: 'Stream search is skipped for lower-priority upcoming matches. Try again when the match goes live.',
     };
   }
 
@@ -354,6 +408,7 @@ export const getLiveStreamsForMatch = async (match, options = {}) => {
   let runtime = null;
   const errors = [];
   const startedAt = Date.now();
+  const attemptedTerms = [];
 
   for (const searchTerm of searchTerms) {
     if (Date.now() - startedAt >= TOTAL_SCRAPE_TIMEOUT_MS) {
@@ -365,6 +420,8 @@ export const getLiveStreamsForMatch = async (match, options = {}) => {
     }
 
     try {
+      attemptedTerms.push(searchTerm);
+      console.log(`[stream-scraper] Trying "${searchTerm}" for ${match.homeTeam} vs ${match.awayTeam}`);
       const result = await runScraperForTerm({ searchTerm, outputName });
       if (result.streams.length > 0) {
         streams = result.streams;
@@ -394,6 +451,12 @@ export const getLiveStreamsForMatch = async (match, options = {}) => {
     cachedAt: Date.now(),
     runtime,
     errors,
+    diagnostics: {
+      skipped: false,
+      attemptedTerms,
+      durationMs: Date.now() - startedAt,
+      priorityMatch: isPriorityMatch(match),
+    },
     message: streams.length > 0
       ? 'Live streams fetched successfully.'
       : errors.length > 0
