@@ -19,7 +19,7 @@ const fetchWithRotation = async (endpoint) => {
   const primary = process.env.FOOTBALL_API_KEY || '';
   const multiple = process.env.FOOTBALL_API_KEYS || '';
   const combined = `${primary},${multiple}`;
-  const keys = [...new Set(combined.split(',').map(k => k.trim()).filter(Boolean))];
+  const keys = [...new Set(combined.replace(/\s+/g, '').split(',').filter(Boolean))];
 
   for (let key of keys) {
     const res = await fetch(`https://v3.football.api-sports.io/${endpoint}`, {
@@ -31,7 +31,8 @@ const fetchWithRotation = async (endpoint) => {
       return data;
     }
 
-    console.log(`MatchSync: Key ${key.slice(0, 5)}... issue detected. Trying next...`);
+    const errorMsg = data.errors ? JSON.stringify(data.errors) : "No response";
+    console.log(`MatchSync: Key ${key.slice(0, 5)}... issue: ${errorMsg}. Trying next...`);
   }
   return { errors: { requests: "Limit Reached" }, response: [] };
 };

@@ -17,9 +17,14 @@ const fetchWithRotation = async (endpoint) => {
       headers: { 'x-apisports-key': key }
     });
     const data = await res.json();
-    // যদি লিমিট শেষ না হয়, তবে ডেটা রিটার্ন করবে
-    if (!(data.errors && data.errors.requests)) return data;
-    console.log(`API Key ${key.slice(0, 5)}... reached limit, trying next...`);
+
+    // যদি কোনো এরর না থাকে এবং রেসপন্স ডেটা থাকে, তবেই রিটার্ন করবে
+    if ((!data.errors || Object.keys(data.errors).length === 0) && data.response) {
+      return data;
+    }
+
+    const errorMsg = data.errors ? JSON.stringify(data.errors) : "Empty response";
+    console.log(`API Key ${key.slice(0, 5)}... issue: ${errorMsg}. Trying next key...`);
   }
   return { errors: { requests: "All API keys reached their daily limit." } };
 };
