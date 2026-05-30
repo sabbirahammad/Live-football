@@ -195,7 +195,7 @@ const validateStreamUrl = async (stream) => {
     let looksPlayable = response.ok;
     if (response.ok && isPlaylist) {
       const body = await response.text();
-      looksPlayable = body.includes('#EXTM3U') || body.includes('#EXTINF') || body.length > 0;
+      looksPlayable = body.includes('#EXTM3U') || body.includes('#EXTINF');
     }
 
     return {
