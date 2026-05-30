@@ -249,8 +249,13 @@ export const getMatches = async (req, res) => {
     // Remove old dummy matches without fixtureId from database to prevent polluting
     await Match.deleteMany({ fixtureId: null });
     
-    // Get matches from DB (which are synced when users open Team Builder or create rooms)
-    const matches = await Match.find({}).sort({ matchTime: 1 });
+    // শুধুমাত্র আপনার পছন্দের টপ লিগগুলো ফিল্টার করার জন্য রেজেক্স (Regex)
+    const topLeaguesRegex = /premier league|la liga|serie a|bundesliga|ligue 1|uefa champions league|ucl|world cup|fifa world cup|wc qualifiers|international|friendly|qualifiers|nations league|euro|copa america|afcon/i;
+
+    // ডাটাবেস থেকে শুধুমাত্র এই লিগের ম্যাচগুলো আনা হবে
+    const matches = await Match.find({
+      league: { $regex: topLeaguesRegex }
+    }).sort({ matchTime: 1 });
 
     // নতুন ডেটা ক্যাশে সেভ করা হচ্ছে
     matchCache.data = matches;
@@ -323,8 +328,12 @@ export const syncMatches = async (req, res) => {
     const data = await response.json();
 
     if (data.response && data.response.length > 0) {
-      const topLeagueIds = [2, 3, 4, 9, 15, 39, 61, 66, 78, 135, 140];
-      const filteredResponse = data.response.filter(item => topLeagueIds.includes(item.league.id));
+      const topLeaguesRegex = /premier league|la liga|serie a|bundesliga|ligue 1|uefa champions league|ucl|world cup|fifa world cup|wc qualifiers|international|friendly|qualifiers|nations league|euro|copa america|afcon/i;
+      
+      // সিঙ্ক করার সময়ও শুধুমাত্র নির্দিষ্ট লিগের ম্যাচগুলোই ফিল্টার করা হবে
+      const filteredResponse = data.response.filter(item => 
+        topLeaguesRegex.test(item.league.name)
+      );
 
       if (filteredResponse.length > 0) {
         const finishedMatchIds = [];
