@@ -221,7 +221,9 @@ export const getPlayersForMatch = async (req, res) => {
           // সিঙ্ক হওয়ার পর সরাসরি অবজেক্টগুলোই পাঠাবো
           return res.status(200).json(playerDocs);
         }
+      }
     }
+  }
 
     // যদি সিঙ্ক না লাগে, ডাটাবেস থেকে সব প্লেয়ার অবজেক্ট খুঁজে পাঠাবো (id নয়)
     const existingPlayers = await Player.find({ _id: { $in: match.players } });
