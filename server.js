@@ -32,16 +32,22 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: "*", // ফ্রন্টএন্ড থেকে রিকোয়েস্ট অ্যালাও করার জন্য
-  }
+    origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : true,
+    methods: ["GET", "POST"]
+  },
+  connectTimeout: 45000
 });
 
 // Controller থেকে io ব্যবহার করার জন্য app-এ সেট করা হলো
 app.set('io', io);
 
 // Middleware সেটআপ (পারফরম্যান্স এবং সিকিউরিটির জন্য)
+app.set('trust proxy', 1); // সার্ভারে (Nginx/Heroku) অরিজিনাল আইপি পাওয়ার জন্য
 app.use(helmet({ crossOriginResourcePolicy: false })); // HTTP security headers (রিলাক্স করা হলো যাতে অ্যাপে ব্লক না হয়)
-app.use(cors({ origin: '*' })); // সব সোর্স থেকে Cross-Origin রিকোয়েস্ট অ্যালাও
+app.use(cors({ 
+  origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : true,
+  credentials: true 
+})); 
 app.use(express.json({ limit: '10mb' })); // বড় সাইজের Base64 Image parse করার জন্য
 app.use(express.urlencoded({ extended: true, limit: '10mb' })); // ফর্ম ডেটা পার্স করার জন্য
 app.use(morgan('dev'));      // API Request log দেখার জন্য
