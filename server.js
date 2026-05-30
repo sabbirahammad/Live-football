@@ -32,7 +32,7 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : true,
+    origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim()) : "*",
     methods: ["GET", "POST"]
   },
   connectTimeout: 45000
@@ -45,7 +45,7 @@ app.set('io', io);
 app.set('trust proxy', 1); // সার্ভারে (Nginx/Heroku) অরিজিনাল আইপি পাওয়ার জন্য
 app.use(helmet({ crossOriginResourcePolicy: false })); // HTTP security headers (রিলাক্স করা হলো যাতে অ্যাপে ব্লক না হয়)
 app.use(cors({ 
-  origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : true,
+  origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim()) : "*",
   credentials: true 
 })); 
 app.use(express.json({ limit: '10mb' })); // বড় সাইজের Base64 Image parse করার জন্য
