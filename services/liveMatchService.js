@@ -25,8 +25,12 @@ const fetchWithRotation = async (endpoint) => {
         headers: { 'x-apisports-key': key }
       });
       const data = await res.json();
-      if (!(data.errors && data.errors.requests)) return data;
-      console.log(`LiveService: Key ${key.slice(0, 5)}... limit reached, trying next...`);
+
+      if ((!data.errors || Object.keys(data.errors).length === 0) && data.response) {
+        return data;
+      }
+
+      console.log(`LiveService: Key ${key.slice(0, 5)}... issue detected, trying next...`);
     } catch (err) {
       console.error(`Error with key ${key.slice(0, 5)}:`, err.message);
     }

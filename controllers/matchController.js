@@ -26,10 +26,14 @@ const fetchWithRotation = async (endpoint) => {
       headers: { 'x-apisports-key': key }
     });
     const data = await res.json();
-    if (!(data.errors && data.errors.requests)) return data;
-    console.log(`MatchSync: Key ${key.slice(0, 5)}... limit reached.`);
+
+    if ((!data.errors || Object.keys(data.errors).length === 0) && data.response) {
+      return data;
+    }
+
+    console.log(`MatchSync: Key ${key.slice(0, 5)}... issue detected. Trying next...`);
   }
-  return { errors: { requests: "Limit Reached" } };
+  return { errors: { requests: "Limit Reached" }, response: [] };
 };
 
 // 📊 ম্যাচ শেষে প্লেয়ারদের ফ্যান্টাসি স্ট্যাটাস (Clean Sheet, Play Time, Position-based goals) আপডেট করা

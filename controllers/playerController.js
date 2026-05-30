@@ -105,10 +105,8 @@ export const getPlayersForMatch = async (req, res) => {
     if (match.players.length === 0 && match.fixtureId) {
         console.log(`Auto-syncing players for fixture ID: ${match.fixtureId}`);
         
-        let homeTeamId = match.homeTeamApiId;
-        let awayTeamId = match.awayTeamApiId;
-
-        if (!homeTeamId || !awayTeamId) {
+        // যদি ম্যাচের টিম আইডি না থাকে, তবে এপিআই থেকে এনে নিবে
+        if (!match.homeTeamApiId || !match.awayTeamApiId) {
           const fixtureData = await fetchWithRotation(`fixtures?id=${match.fixtureId}`);
 
           if (fixtureData.errors && Object.keys(fixtureData.errors).length > 0) {
@@ -116,16 +114,14 @@ export const getPlayersForMatch = async (req, res) => {
           }
 
           if (fixtureData.response && fixtureData.response.length > 0) {
-            homeTeamId = fixtureData.response[0].teams.home.id;
-            awayTeamId = fixtureData.response[0].teams.away.id;
-            
-            match.homeTeamApiId = homeTeamId;
-            match.awayTeamApiId = awayTeamId;
+            match.homeTeamApiId = fixtureData.response[0].teams.home.id;
+            match.awayTeamApiId = fixtureData.response[0].teams.away.id;
             await match.save();
-          } else {
-            return res.status(404).json({ message: 'Match details not found from API.' });
           }
         }
+
+        const homeTeamId = match.homeTeamApiId;
+        const awayTeamId = match.awayTeamApiId;
 
         if (homeTeamId && awayTeamId) {
           const calendarYear = new Date().getFullYear();
