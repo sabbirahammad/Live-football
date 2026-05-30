@@ -61,6 +61,8 @@ app.use('/api/rooms', roomRoutes);
 app.use('/api/leaderboard', leaderboardRoutes);
 app.use('/api/streams', streamRoutes);
 app.use('/api/admin/streams', adminStreamRoutes);
+app.use('/api/admin/users', adminUserRoutes);
+app.use('/api/admin/stats', adminStatsRoutes);
 
 // বেসিক টেস্টিং রাউট
 app.get('/', (req, res) => {
@@ -197,3 +199,4 @@ cron.schedule('0 0 * * 0', async () => {
 
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => console.log(`🚀 Server running in ${process.env.NODE_ENV} mode on port ${PORT}`));
+${PORT}`));
