@@ -1,4 +1,3 @@
-import axios from 'axios';
 import LiveMatch from '../models/LiveMatch.js';
 import Match from '../models/Match.js';
 import Player from '../models/Player.js';
@@ -9,7 +8,31 @@ import { clearLeaderboardCache } from '../controllers/leaderboardController.js';
 
 const LIVE_SHORT_CODES = ['1H', '2H', 'HT', 'ET', 'P', 'LIVE'];
 const FINISHED_SHORT_CODES = ['FT', 'AET', 'PEN'];
-const TOP_LEAGUE_IDS = [2, 3, 4, 9, 15, 39, 61, 66, 78, 135, 140];
+const TOP_LEAGUES_REGEX = /premier league|la liga|serie a|bundesliga|ligue 1|uefa champions league|ucl|world cup|fifa world cup|wc qualifiers|international|friendly|qualifiers|nations league|euro|copa america|afcon/i;
+
+const getApiKeys = () => {
+  const primary = process.env.FOOTBALL_API_KEY || '';
+  const multiple = process.env.FOOTBALL_API_KEYS || '';
+  const combined = `${primary},${multiple}`;
+  return [...new Set(combined.split(',').map(k => k.trim()).filter(Boolean))];
+};
+
+const fetchWithRotation = async (endpoint) => {
+  const keys = getApiKeys();
+  for (let key of keys) {
+    try {
+      const res = await fetch(`https://v3.football.api-sports.io/${endpoint}`, {
+        headers: { 'x-apisports-key': key }
+      });
+      const data = await res.json();
+      if (!(data.errors && data.errors.requests)) return data;
+      console.log(`LiveService: Key ${key.slice(0, 5)}... limit reached, trying next...`);
+    } catch (err) {
+      console.error(`Error with key ${key.slice(0, 5)}:`, err.message);
+    }
+  }
+  return { errors: { requests: "All API keys reached their daily limit." } };
+};
 
 const LIVE_POINT_RULES = {
   GoalDefault: 4, // Will be overridden dynamically based on position
@@ -268,9 +291,6 @@ const upsertAppMatch = async (item, io) => {
 };
 
 export const syncMatchesFromApi = async (io, options = {}) => {
-  const apiKey = process.env.FOOTBALL_API_KEY;
-  if (!apiKey) throw new Error('FOOTBALL_API_KEY not found in .env');
-
   const today = new Date();
   const tomorrow = new Date(today);
   tomorrow.setDate(tomorrow.getDate() + 1);
@@ -281,10 +301,7 @@ export const syncMatchesFromApi = async (io, options = {}) => {
 
   const responses = await Promise.all(
     dates.map(async (date) => {
-      const response = await fetch(`https://v3.football.api-sports.io/fixtures?date=${date}`, {
-        headers: { 'x-apisports-key': apiKey }
-      });
-      const data = await response.json();
+      const data = await fetchWithRotation(`fixtures?date=${date}`);
       return Array.isArray(data.response) ? data.response : [];
     })
   );
@@ -297,7 +314,9 @@ export const syncMatchesFromApi = async (io, options = {}) => {
   const dedupedResponse = Array.from(
     new Map(mergedResponse.map((item) => [item.fixture.id, item])).values()
   );
-  const filteredResponse = dedupedResponse.filter(item => TOP_LEAGUE_IDS.includes(item.league.id));
+  const filteredResponse = dedupedResponse.filter(item => 
+    TOP_LEAGUES_REGEX.test(item.league.name)
+  );
   const finishedMatchIds = [];
 
   for (const item of filteredResponse) {
@@ -320,13 +339,8 @@ export const syncMatchesFromApi = async (io, options = {}) => {
 export const fetchAndSaveLiveMatches = async (io) => {
   try {
     console.log('Fetching live matches from api-sports...');
-    const response = await axios.get('https://v3.football.api-sports.io/fixtures?live=all', {
-      headers: {
-        'x-apisports-key': process.env.FOOTBALL_API_KEY
-      }
-    });
-
-    const matches = response.data.response;
+    const data = await fetchWithRotation('fixtures?live=all');
+    const matches = data.response;
 
     if (matches && matches.length > 0) {
       for (const match of matches) {

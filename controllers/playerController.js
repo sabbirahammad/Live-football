@@ -1,6 +1,29 @@
 import Player from '../models/Player.js';
 import Match from '../models/Match.js';
 
+// একাধিক API কী হ্যান্ডেল করার জন্য হেল্পার
+const getApiKeys = () => {
+  const primary = process.env.FOOTBALL_API_KEY || '';
+  const multiple = process.env.FOOTBALL_API_KEYS || '';
+  const combined = `${primary},${multiple}`;
+  return [...new Set(combined.split(',').map(k => k.trim()).filter(Boolean))];
+};
+
+// কমন ফেচ লজিক যা কী রোটেশন সাপোর্ট করে
+const fetchWithRotation = async (endpoint) => {
+  const keys = getApiKeys();
+  for (let key of keys) {
+    const res = await fetch(`https://v3.football.api-sports.io/${endpoint}`, {
+      headers: { 'x-apisports-key': key }
+    });
+    const data = await res.json();
+    // যদি লিমিট শেষ না হয়, তবে ডেটা রিটার্ন করবে
+    if (!(data.errors && data.errors.requests)) return data;
+    console.log(`API Key ${key.slice(0, 5)}... reached limit, trying next...`);
+  }
+  return { errors: { requests: "All API keys reached their daily limit." } };
+};
+
 // Helper function to generate realistic and consistent player prices based on their position
 const calculatePlayerPrice = (apiId, pos) => {
   // Deterministic pseudo-random number between 0 and 1 based on player ID
@@ -49,32 +72,28 @@ export const getPlayersForMatch = async (req, res) => {
 
     // Auto-sync Match from API-Football if not in MongoDB
     if (!match && !isNaN(matchId)) {
-      const apiKey = process.env.FOOTBALL_API_KEY;
-      if (apiKey) {
-        console.log(`Auto-syncing Match ${matchId} to DB...`);
-        const fixtureRes = await fetch(`https://v3.football.api-sports.io/fixtures?id=${matchId}`, {
-          headers: { 'x-apisports-key': apiKey }
-        });
-        const fixtureData = await fixtureRes.json();
-        
-        if (fixtureData.errors && Object.keys(fixtureData.errors).length > 0) {
+      console.log(`Auto-syncing Match ${matchId} to DB...`);
+      const fixtureData = await fetchWithRotation(`fixtures?id=${matchId}`);
+      
+      if (fixtureData.errors && Object.keys(fixtureData.errors).length > 0) {
+        if (fixtureData.errors.requests) {
           return res.status(429).json({ message: `API-Sports Error: ${Object.values(fixtureData.errors)[0]}` });
         }
+      }
 
-        if (fixtureData.response && fixtureData.response.length > 0) {
-          const item = fixtureData.response[0];
-          match = await Match.create({
-            fixtureId: item.fixture.id,
-            homeTeam: item.teams.home.name,
-            awayTeam: item.teams.away.name,
-            homeLogo: item.teams.home.logo || '',
-            awayLogo: item.teams.away.logo || '',
-            matchTime: new Date(item.fixture.date),
-            league: item.league.name,
-            status: ['1H','2H','HT','ET','P','LIVE'].includes(item.fixture.status.short) ? 'Live' : 
-                    ['FT','AET','PEN'].includes(item.fixture.status.short) ? 'Finished' : 'Upcoming'
-          });
-        }
+      if (fixtureData.response && fixtureData.response.length > 0) {
+        const item = fixtureData.response[0];
+        match = await Match.create({
+          fixtureId: item.fixture.id,
+          homeTeam: item.teams.home.name,
+          awayTeam: item.teams.away.name,
+          homeLogo: item.teams.home.logo || '',
+          awayLogo: item.teams.away.logo || '',
+          matchTime: new Date(item.fixture.date),
+          league: item.league.name,
+          status: ['1H', '2H', 'HT', 'ET', 'P', 'LIVE'].includes(item.fixture.status.short) ? 'Live' :
+            ['FT', 'AET', 'PEN'].includes(item.fixture.status.short) ? 'Finished' : 'Upcoming'
+        });
       }
     }
 
@@ -84,18 +103,13 @@ export const getPlayersForMatch = async (req, res) => {
 
     // Auto-sync players if empty
     if (match.players.length === 0 && match.fixtureId) {
-      const apiKey = process.env.FOOTBALL_API_KEY;
-      if (apiKey) {
         console.log(`Auto-syncing players for fixture ID: ${match.fixtureId}`);
         
         let homeTeamId = match.homeTeamApiId;
         let awayTeamId = match.awayTeamApiId;
 
         if (!homeTeamId || !awayTeamId) {
-          const fixtureRes = await fetch(`https://v3.football.api-sports.io/fixtures?id=${match.fixtureId}`, {
-            headers: { 'x-apisports-key': apiKey }
-          });
-          const fixtureData = await fixtureRes.json();
+          const fixtureData = await fetchWithRotation(`fixtures?id=${match.fixtureId}`);
 
           if (fixtureData.errors && Object.keys(fixtureData.errors).length > 0) {
             return res.status(429).json({ message: `API-Sports Error: ${Object.values(fixtureData.errors)[0]}` });
@@ -114,27 +128,37 @@ export const getPlayersForMatch = async (req, res) => {
         }
 
         if (homeTeamId && awayTeamId) {
-          const currentYear = new Date().getFullYear();
-          const season = new Date().getMonth() >= 7 ? currentYear : currentYear - 1;
+          const calendarYear = new Date().getFullYear();
+          const footballSeason = new Date().getMonth() >= 7 ? calendarYear : calendarYear - 1;
 
-          // ২. Home, Away টিমের স্কোয়াড (বা প্লেয়ার লিস্ট) এবং রিয়েল ইনজুরি লিস্ট আনা
+          // ২. Home, Away টিমের স্কোয়াড এবং ইনজুরি লিস্ট আনা (রোটেশনসহ)
           const [homeSquadRes, awaySquadRes, injuryRes] = await Promise.all([
-            fetch(`https://v3.football.api-sports.io/players/squads?team=${homeTeamId}`, { headers: { 'x-apisports-key': apiKey } }).then(r => r.json()),
-            fetch(`https://v3.football.api-sports.io/players/squads?team=${awayTeamId}`, { headers: { 'x-apisports-key': apiKey } }).then(r => r.json()),
-            fetch(`https://v3.football.api-sports.io/injuries?fixture=${match.fixtureId}`, { headers: { 'x-apisports-key': apiKey } }).then(r => r.json())
+            fetchWithRotation(`players/squads?team=${homeTeamId}`),
+            fetchWithRotation(`players/squads?team=${awayTeamId}`),
+            fetchWithRotation(`injuries?fixture=${match.fixtureId}`)
           ]);
           
           let homeSquadData = homeSquadRes;
           let awaySquadData = awaySquadRes;
           const injuryData = injuryRes;
 
-          // Fallback: যদি Squad ডেটা খালি থাকে, তবে ঐ টিমের সমস্ত প্লেয়ারদের খুঁজবে
+          // Fallback 1: ফুটবল সিজন অনুযায়ী প্লেয়ারদের খোঁজা
           if (!homeSquadData.response || homeSquadData.response.length === 0) {
-            const fb = await fetch(`https://v3.football.api-sports.io/players?team=${homeTeamId}&season=${season}`, { headers: { 'x-apisports-key': apiKey } }).then(r => r.json());
+            const fb = await fetchWithRotation(`players?team=${homeTeamId}&season=${footballSeason}`);
             if (fb.response?.length > 0) homeSquadData = { response: [{ team: fb.response[0].statistics[0].team, players: fb.response.map(x => x.player) }] };
           }
+          // Fallback 2: ক্যালেন্ডার ইয়ার অনুযায়ী খোঁজা (ইন্টারন্যাশনাল ম্যাচের জন্য কার্যকরী)
+          if (!homeSquadData.response || homeSquadData.response.length === 0) {
+            const fb = await fetchWithRotation(`players?team=${homeTeamId}&season=${calendarYear}`);
+            if (fb.response?.length > 0) homeSquadData = { response: [{ team: fb.response[0].statistics[0].team, players: fb.response.map(x => x.player) }] };
+          }
+
           if (!awaySquadData.response || awaySquadData.response.length === 0) {
-            const fb = await fetch(`https://v3.football.api-sports.io/players?team=${awayTeamId}&season=${season}`, { headers: { 'x-apisports-key': apiKey } }).then(r => r.json());
+            const fb = await fetchWithRotation(`players?team=${awayTeamId}&season=${footballSeason}`);
+            if (fb.response?.length > 0) awaySquadData = { response: [{ team: fb.response[0].statistics[0].team, players: fb.response.map(x => x.player) }] };
+          }
+          if (!awaySquadData.response || awaySquadData.response.length === 0) {
+            const fb = await fetchWithRotation(`players?team=${awayTeamId}&season=${calendarYear}`);
             if (fb.response?.length > 0) awaySquadData = { response: [{ team: fb.response[0].statistics[0].team, players: fb.response.map(x => x.player) }] };
           }
 
@@ -194,15 +218,14 @@ export const getPlayersForMatch = async (req, res) => {
           match.players = playerObjectIds;
           await match.save();
 
+          // সিঙ্ক হওয়ার পর সরাসরি অবজেক্টগুলোই পাঠাবো
           return res.status(200).json(playerDocs);
-        } else {
-          return res.status(400).json({ message: "Could not resolve team IDs for this match from API." });
         }
-      }
-      }
     }
 
-    res.status(200).json(match.players);
+    // যদি সিঙ্ক না লাগে, ডাটাবেস থেকে সব প্লেয়ার অবজেক্ট খুঁজে পাঠাবো (id নয়)
+    const existingPlayers = await Player.find({ _id: { $in: match.players } });
+    res.status(200).json(existingPlayers);
   } catch (error) {
     res.status(500).json({ message: 'Server error fetching players', error: error.message });
   }
@@ -213,11 +236,6 @@ export const getPlayersForMatch = async (req, res) => {
 // @access  Private
 export const syncPlayersForMatch = async (req, res) => {
   const { matchId } = req.params;
-  const apiKey = process.env.FOOTBALL_API_KEY;
-
-  if (!apiKey) {
-    return res.status(400).json({ message: "FOOTBALL_API_KEY not found in .env" });
-  }
 
   try {
     const match = await Match.findById(matchId);
@@ -231,10 +249,7 @@ export const syncPlayersForMatch = async (req, res) => {
     let awayTeamId = match.awayTeamApiId;
 
     if (!homeTeamId || !awayTeamId) {
-      const fixtureRes = await fetch(`https://v3.football.api-sports.io/fixtures?id=${match.fixtureId}`, {
-        headers: { 'x-apisports-key': apiKey }
-      });
-      const fixtureData = await fixtureRes.json();
+      const fixtureData = await fetchWithRotation(`fixtures?id=${match.fixtureId}`);
 
       if (fixtureData.errors && Object.keys(fixtureData.errors).length > 0) {
         return res.status(429).json({ message: `API-Sports Error: ${Object.values(fixtureData.errors)[0]}` });
@@ -258,22 +273,18 @@ export const syncPlayersForMatch = async (req, res) => {
     const currentYear = new Date().getFullYear();
     const season = new Date().getMonth() >= 7 ? currentYear : currentYear - 1;
 
-    const [homeSquadRes, awaySquadRes, injuryRes] = await Promise.all([
-      fetch(`https://v3.football.api-sports.io/players/squads?team=${homeTeamId}`, { headers: { 'x-apisports-key': apiKey } }).then(r => r.json()),
-      fetch(`https://v3.football.api-sports.io/players/squads?team=${awayTeamId}`, { headers: { 'x-apisports-key': apiKey } }).then(r => r.json()),
-      fetch(`https://v3.football.api-sports.io/injuries?fixture=${match.fixtureId}`, { headers: { 'x-apisports-key': apiKey } }).then(r => r.json())
+    const [homeSquadData, awaySquadData, injuryData] = await Promise.all([
+      fetchWithRotation(`players/squads?team=${homeTeamId}`),
+      fetchWithRotation(`players/squads?team=${awayTeamId}`),
+      fetchWithRotation(`injuries?fixture=${match.fixtureId}`)
     ]);
 
-    let homeSquadData = homeSquadRes;
-    let awaySquadData = awaySquadRes;
-    const injuryData = injuryRes;
-
     if (!homeSquadData.response || homeSquadData.response.length === 0) {
-      const fb = await fetch(`https://v3.football.api-sports.io/players?team=${homeTeamId}&season=${season}`, { headers: { 'x-apisports-key': apiKey } }).then(r => r.json());
+      const fb = await fetchWithRotation(`players?team=${homeTeamId}&season=${season}`);
       if (fb.response?.length > 0) homeSquadData = { response: [{ team: fb.response[0].statistics[0].team, players: fb.response.map(x => x.player) }] };
     }
     if (!awaySquadData.response || awaySquadData.response.length === 0) {
-      const fb = await fetch(`https://v3.football.api-sports.io/players?team=${awayTeamId}&season=${season}`, { headers: { 'x-apisports-key': apiKey } }).then(r => r.json());
+      const fb = await fetchWithRotation(`players?team=${awayTeamId}&season=${season}`);
       if (fb.response?.length > 0) awaySquadData = { response: [{ team: fb.response[0].statistics[0].team, players: fb.response.map(x => x.player) }] };
     }
 

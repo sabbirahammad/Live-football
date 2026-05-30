@@ -15,17 +15,28 @@ export const clearMatchCache = () => {
   matchCache.lastFetch = 0; // ফোর্স রিলোড করার জন্য
 };
 
+const fetchWithRotation = async (endpoint) => {
+  const primary = process.env.FOOTBALL_API_KEY || '';
+  const multiple = process.env.FOOTBALL_API_KEYS || '';
+  const combined = `${primary},${multiple}`;
+  const keys = [...new Set(combined.split(',').map(k => k.trim()).filter(Boolean))];
+
+  for (let key of keys) {
+    const res = await fetch(`https://v3.football.api-sports.io/${endpoint}`, {
+      headers: { 'x-apisports-key': key }
+    });
+    const data = await res.json();
+    if (!(data.errors && data.errors.requests)) return data;
+    console.log(`MatchSync: Key ${key.slice(0, 5)}... limit reached.`);
+  }
+  return { errors: { requests: "Limit Reached" } };
+};
+
 // 📊 ম্যাচ শেষে প্লেয়ারদের ফ্যান্টাসি স্ট্যাটাস (Clean Sheet, Play Time, Position-based goals) আপডেট করা
 const processMatchStatistics = async (matchId, fixtureId) => {
-  const apiKey = process.env.FOOTBALL_API_KEY;
-  if (!apiKey) return;
-
   try {
     console.log(`\n📊 Fetching Final Player Statistics from API-Sports for Match: ${matchId}`);
-    const response = await fetch(`https://v3.football.api-sports.io/fixtures/players?fixture=${fixtureId}`, {
-      headers: { 'x-apisports-key': apiKey }
-    });
-    const data = await response.json();
+    const data = await fetchWithRotation(`fixtures/players?fixture=${fixtureId}`);
 
     if (data.response && data.response.length > 0) {
       const matchPlayers = []; // BPS ট্র্যাক করার জন্য
@@ -317,15 +328,9 @@ export const simulateLiveEvent = async (req, res) => {
 // @route   POST /api/matches/sync
 // @access  Public
 export const syncMatches = async (req, res) => {
-  const apiKey = process.env.FOOTBALL_API_KEY;
-  if (!apiKey) return res.status(400).json({ message: "FOOTBALL_API_KEY not found in .env" });
-
   try {
     const today = new Date().toISOString().split('T')[0];
-    const response = await fetch(`https://v3.football.api-sports.io/fixtures?date=${today}`, {
-      headers: { 'x-apisports-key': apiKey }
-    });
-    const data = await response.json();
+    const data = await fetchWithRotation(`fixtures?date=${today}`);
 
     if (data.response && data.response.length > 0) {
       const topLeaguesRegex = /premier league|la liga|serie a|bundesliga|ligue 1|uefa champions league|ucl|world cup|fifa world cup|wc qualifiers|international|friendly|qualifiers|nations league|euro|copa america|afcon/i;
@@ -401,26 +406,16 @@ export const syncMatches = async (req, res) => {
 // @access  Public
 export const proxyFootballData = async (req, res) => {
   const { resource } = req.params;
-  const apiKey = process.env.FOOTBALL_API_KEY;
 
   console.log(`\n[PROXY REQUEST] Target Resource: ${resource} | Query:`, req.query);
 
-  if (!apiKey) {
-    console.error("❌ [PROXY ERROR] FOOTBALL_API_KEY is missing in backend environment variables!");
-    return res.status(500).json({ message: "Backend API Key missing" });
-  }
-
   try {
     const queryParams = new URLSearchParams(req.query).toString();
-    const url = `https://v3.football.api-sports.io/${resource}${queryParams ? '?' + queryParams : ''}`;
+    const endpoint = `${resource}${queryParams ? '?' + queryParams : ''}`;
 
-    console.log(`📡 [PROXY] Fetching URL: ${url}`);
+    console.log(`📡 [PROXY] Fetching Resource: ${resource}`);
 
-    const response = await fetch(url, {
-      headers: { 'x-apisports-key': apiKey },
-    });
-
-    const data = await response.json();
+    const data = await fetchWithRotation(endpoint);
 
     // API-Sports এর নিজস্ব কোনো error আছে কি না চেক করে লগে দেখানো
     if (data.errors && Object.keys(data.errors).length > 0) {
@@ -429,7 +424,7 @@ export const proxyFootballData = async (req, res) => {
       console.log(`✅ [PROXY SUCCESS] Results found: ${data.results}`);
     }
 
-    res.status(response.status).json(data);
+    res.status(200).json(data);
   } catch (error) {
     console.error("❌ [PROXY SERVER ERROR] Fetch failed:", error.message);
     res.status(500).json({ message: 'Server error proxying data', error: error.message });
