@@ -223,11 +223,10 @@ export const getPlayersForMatch = async (req, res) => {
         }
       }
     }
-  }
 
-    // যদি সিঙ্ক না লাগে, ডাটাবেস থেকে সব প্লেয়ার অবজেক্ট খুঁজে পাঠাবো (id নয়)
-    const existingPlayers = await Player.find({ _id: { $in: match.players } });
-    res.status(200).json(existingPlayers);
+  // যদি সিঙ্ক না লাগে, ডাটাবেস থেকে সব প্লেয়ার অবজেক্ট খুঁজে পাঠাবো (id নয়)
+  const existingPlayers = await Player.find({ _id: { $in: match.players } });
+  res.status(200).json(existingPlayers);
   } catch (error) {
     res.status(500).json({ message: 'Server error fetching players', error: error.message });
   }
