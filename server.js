@@ -16,6 +16,9 @@ import roomRoutes from './routes/roomRoutes.js';
 import leaderboardRoutes from './routes/leaderboardRoutes.js';
 import streamRoutes from './routes/streamRoutes.js';
 import adminStreamRoutes from './routes/adminStreamRoutes.js';
+// missing imports যোগ করা হলো (আপনার ফাইল পাথ অনুযায়ী চেক করে নিন)
+import adminUserRoutes from './routes/adminUserRoutes.js'; 
+import adminStatsRoutes from './routes/adminStatsRoutes.js';
 import { fetchAndSaveLiveMatches } from './services/liveMatchService.js';
 import { startStreamPrefetchLoop } from './services/streamScraperService.js';
 
@@ -199,4 +202,3 @@ cron.schedule('0 0 * * 0', async () => {
 
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => console.log(`🚀 Server running in ${process.env.NODE_ENV} mode on port ${PORT}`));
-${PORT}`));
