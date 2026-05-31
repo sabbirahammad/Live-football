@@ -12,7 +12,7 @@ const TOP_LEAGUES_REGEX = /(premier league|la liga|serie a|bundesliga|ligue 1|ue
 const TOP_LEAGUE_IDS = [1, 2, 3, 4, 5, 9, 15, 39, 61, 78, 135, 140, 31, 32, 33, 34, 35, 10]; // Consistent with matchController
 
 // 🚫 বাদ দেওয়া হবে এমন কি-ওয়ার্ড (Exclusion logic consistent with matchController)
-const EXCLUDED_LEAGUES_REGEX = /(league b|league c|league d|division 2|division 3|division 4|serie b|2\. bundesliga|segunda|u19|u20|u21|u23|youth|reserve|relegation|play-offs|amateur|regional|conference|women|cup|trophy)/i; // More comprehensive
+const EXCLUDED_LEAGUES_REGEX = /(league[ \-_][b-z]|division[ \-_][2-9]|tier[ \-_][2-9]|serie[ \-_][b-z]|bundesliga[ \-_]2|segunda|u[12][0-9]|youth|reserve|relegation|play-offs|amateur|regional|conference|women|cup|trophy)/i;
 
 const getApiKeys = () => {
   const keys = (process.env.FOOTBALL_API_KEY || '') + ',' + (process.env.FOOTBALL_API_KEYS || '');
@@ -320,9 +320,9 @@ export const syncMatchesFromApi = async (io, options = {}) => {
   const dedupedResponse = Array.from(
     new Map(mergedResponse.map((item) => [item.fixture.id, item])).values()
   );
-  const filteredResponse = dedupedResponse.filter(item => 
-    TOP_LEAGUE_IDS.includes(item.league.id) || 
-    (TOP_LEAGUES_REGEX.test(item.league.name) && !EXCLUDED_LEAGUES_REGEX.test(item.league.name))
+  const filteredResponse = dedupedResponse.filter(item =>
+    (TOP_LEAGUE_IDS.includes(item.league.id) || TOP_LEAGUES_REGEX.test(item.league.name)) && 
+    !EXCLUDED_LEAGUES_REGEX.test(item.league.name)
   );
   const finishedMatchIds = [];
 

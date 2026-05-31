@@ -17,7 +17,7 @@ const TOP_LEAGUE_IDS = [1, 2, 3, 4, 5, 9, 15, 39, 61, 78, 135, 140, 31, 32, 33, 
 const TOP_LEAGUES_REGEX = /(premier league|la liga|serie a|bundesliga|ligue 1|uefa champions league|ucl|world cup|fifa world cup|wc qualifiers|international|qualifiers|nations league|euro|copa america|afcon)/i;
 
 // 🚫 বাদ দেওয়া হবে এমন কি-ওয়ার্ড (Lower Divisions & Youth)
-const EXCLUDED_LEAGUES_REGEX = /(league b|league c|league d|division 2|division 3|division 4|serie b|2\. bundesliga|segunda|u19|u20|u21|u23|youth|reserve|relegation|play-offs|amateur|regional|conference|women|cup|trophy)/i;
+const EXCLUDED_LEAGUES_REGEX = /(league[ \-_][b-z]|division[ \-_][2-9]|tier[ \-_][2-9]|serie[ \-_][b-z]|bundesliga[ \-_]2|segunda|u[12][0-9]|youth|reserve|relegation|play-offs|amateur|regional|conference|women|cup|trophy)/i;
 
 export const clearMatchCache = () => {
   matchCache.lastFetch = 0; // ফোর্স রিলোড করার জন্য
@@ -381,10 +381,9 @@ export const syncMatches = async (req, res) => {
 
     if (data.response && data.response.length > 0) {
       // ✅ আইডি এবং নাম—উভয়ভাবেই ফিল্টার করা হচ্ছে যাতে ভুল ম্যাচ না ঢুকে
-      const filteredResponse = data.response.filter(item => 
-        TOP_LEAGUE_IDS.includes(item.league.id) || 
-        (TOP_LEAGUES_REGEX.test(item.league.name) && 
-         !EXCLUDED_LEAGUES_REGEX.test(item.league.name))
+      const filteredResponse = data.response.filter(item =>
+        (TOP_LEAGUE_IDS.includes(item.league.id) || TOP_LEAGUES_REGEX.test(item.league.name)) && 
+        !EXCLUDED_LEAGUES_REGEX.test(item.league.name)
       );
 
       if (filteredResponse.length > 0) {
