@@ -6,13 +6,13 @@ import Room from '../models/Room.js';
 import { processAutoSubsAndRewards } from '../controllers/matchController.js';
 import { clearLeaderboardCache } from '../controllers/leaderboardController.js';
 
-const LIVE_SHORT_CODES = ['1H', '2H', 'HT', 'ET', 'P', 'LIVE'];
-const FINISHED_SHORT_CODES = ['FT', 'AET', 'PEN'];
-const TOP_LEAGUES_REGEX = /^(premier league|la liga|serie a|bundesliga|ligue 1|uefa champions league|ucl|world cup|fifa world cup|wc qualifiers|international|friendly|qualifiers|nations league|euro|copa america|afcon)$/i;
-const TOP_LEAGUE_IDS = [1, 2, 3, 4, 5, 9, 15, 39, 61, 78, 135, 140, 10];
+const LIVE_SHORT_CODES = ['1H', '2H', 'HT', 'ET', 'P', 'LIVE']; // No change
+const FINISHED_SHORT_CODES = ['FT', 'AET', 'PEN']; // No change
+const TOP_LEAGUES_REGEX = /(premier league|la liga|serie a|bundesliga|ligue 1|uefa champions league|ucl|world cup|fifa world cup|wc qualifiers|international|qualifiers|nations league|euro|copa america|afcon)/i; // 'friendly' removed for consistency with EXCLUDED_LEAGUES_REGEX
+const TOP_LEAGUE_IDS = [1, 2, 3, 4, 5, 9, 15, 39, 61, 78, 135, 140, 31, 32, 33, 34, 35, 10]; // Consistent with matchController
 
 // 🚫 বাদ দেওয়া হবে এমন কি-ওয়ার্ড (Exclusion logic consistent with matchController)
-const EXCLUDED_LEAGUES_REGEX = /(league b|league c|league d|division 2|division 3|division 4|serie b|2\. bundesliga|segunda|u21|u23|u19|youth|reserve|relegation|play-offs)/i;
+const EXCLUDED_LEAGUES_REGEX = /(league b|league c|league d|division 2|division 3|division 4|serie b|2\. bundesliga|segunda|u19|u20|u21|u23|youth|reserve|relegation|play-offs|amateur|regional|conference|women|cup|trophy)/i; // More comprehensive
 
 const getApiKeys = () => {
   const keys = (process.env.FOOTBALL_API_KEY || '') + ',' + (process.env.FOOTBALL_API_KEYS || '');

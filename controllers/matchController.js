@@ -14,10 +14,10 @@ const CACHE_TTL = 15 * 1000; // 15 seconds cache TTL
 
 // ✅ টপ লিগগুলোর নির্দিষ্ট ID (League ID) তালিকা এবং নামের রেজেক্স
 const TOP_LEAGUE_IDS = [1, 2, 3, 4, 5, 9, 15, 39, 61, 78, 135, 140, 31, 32, 33, 34, 35, 10]; 
-const TOP_LEAGUES_REGEX = /(premier league|la liga|serie a|bundesliga|ligue 1|uefa champions league|ucl|world cup|fifa world cup|wc qualifiers|international|friendly|qualifiers|nations league|euro|copa america|afcon)/i;
+const TOP_LEAGUES_REGEX = /(premier league|la liga|serie a|bundesliga|ligue 1|uefa champions league|ucl|world cup|fifa world cup|wc qualifiers|international|qualifiers|nations league|euro|copa america|afcon)/i;
 
 // 🚫 বাদ দেওয়া হবে এমন কি-ওয়ার্ড (Lower Divisions & Youth)
-const EXCLUDED_LEAGUES_REGEX = /(league b|league c|league d|division 2|division 3|division 4|serie b|2\. bundesliga|segunda|u21|u23|u19|youth|reserve|relegation|play-offs)/i;
+const EXCLUDED_LEAGUES_REGEX = /(league b|league c|league d|division 2|division 3|division 4|serie b|2\. bundesliga|segunda|u19|u20|u21|u23|youth|reserve|relegation|play-offs|amateur|regional|conference|women|cup|trophy)/i;
 
 export const clearMatchCache = () => {
   matchCache.lastFetch = 0; // ফোর্স রিলোড করার জন্য
