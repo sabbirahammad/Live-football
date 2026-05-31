@@ -16,25 +16,28 @@ export const clearMatchCache = () => {
 };
 
 const fetchWithRotation = async (endpoint) => {
-  const primary = process.env.FOOTBALL_API_KEY || '';
-  const multiple = process.env.FOOTBALL_API_KEYS || '';
-  const combined = `${primary},${multiple}`;
-  const keys = [...new Set(combined.replace(/\s+/g, '').split(',').filter(Boolean))];
+  const keys = ((process.env.FOOTBALL_API_KEY || '') + ',' + (process.env.FOOTBALL_API_KEYS || ''))
+    .split(',').map(k => k.trim()).filter(Boolean);
+  const uniqueKeys = [...new Set(keys)];
 
-  for (let key of keys) {
-    const res = await fetch(`https://v3.football.api-sports.io/${endpoint}`, {
-      headers: { 'x-apisports-key': key }
-    });
-    const data = await res.json();
+  for (const [index, key] of uniqueKeys.entries()) {
+    try {
+      const res = await fetch(`https://v3.football.api-sports.io/${endpoint}`, {
+        headers: { 'x-apisports-key': key }
+      });
+      const data = await res.json();
 
-    if ((!data.errors || Object.keys(data.errors).length === 0) && data.response) {
-      return data;
+      if ((!data.errors || Object.keys(data.errors).length === 0) && data.response) {
+        return data;
+      }
+
+      const errorMsg = data.errors ? JSON.stringify(data.errors) : "No response";
+      console.warn(`MatchSync: Key ${index + 1} issue: ${errorMsg}`);
+    } catch (err) {
+      console.error(`MatchSync: Key ${index + 1} error:`, err.message);
     }
-
-    const errorMsg = data.errors ? JSON.stringify(data.errors) : "No response";
-    console.log(`MatchSync: Key ${key.slice(0, 5)}... issue: ${errorMsg}. Trying next...`);
   }
-  return { errors: { requests: "Limit Reached" }, response: [] };
+  return { errors: { requests: "All keys exhausted" }, response: [] };
 };
 
 // 📊 ম্যাচ শেষে প্লেয়ারদের ফ্যান্টাসি স্ট্যাটাস (Clean Sheet, Play Time, Position-based goals) আপডেট করা
@@ -266,7 +269,7 @@ export const getMatches = async (req, res) => {
     await Match.deleteMany({ fixtureId: null });
     
     // শুধুমাত্র আপনার পছন্দের টপ লিগগুলো ফিল্টার করার জন্য রেজেক্স (Regex)
-    const topLeaguesRegex = /premier league|la liga|serie a|bundesliga|ligue 1|uefa champions league|ucl|world cup|fifa world cup|wc qualifiers|international|friendly|qualifiers|nations league|euro|copa america|afcon/i;
+    const topLeaguesRegex = /^(premier league|la liga|serie a|bundesliga|ligue 1|uefa champions league|ucl|world cup|fifa world cup|wc qualifiers|international|friendly|qualifiers|nations league|euro|copa america|afcon)$/i;
 
     // ডাটাবেস থেকে শুধুমাত্র এই লিগের ম্যাচগুলো আনা হবে
     const matches = await Match.find({
@@ -338,7 +341,7 @@ export const syncMatches = async (req, res) => {
     const data = await fetchWithRotation(`fixtures?date=${today}`);
 
     if (data.response && data.response.length > 0) {
-      const topLeaguesRegex = /premier league|la liga|serie a|bundesliga|ligue 1|uefa champions league|ucl|world cup|fifa world cup|wc qualifiers|international|friendly|qualifiers|nations league|euro|copa america|afcon/i;
+      const topLeaguesRegex = /^(premier league|la liga|serie a|bundesliga|ligue 1|uefa champions league|ucl|world cup|fifa world cup|wc qualifiers|international|friendly|qualifiers|nations league|euro|copa america|afcon)$/i;
       
       // সিঙ্ক করার সময়ও শুধুমাত্র নির্দিষ্ট লিগের ম্যাচগুলোই ফিল্টার করা হবে
       const filteredResponse = data.response.filter(item => 

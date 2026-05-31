@@ -8,18 +8,16 @@ import { clearLeaderboardCache } from '../controllers/leaderboardController.js';
 
 const LIVE_SHORT_CODES = ['1H', '2H', 'HT', 'ET', 'P', 'LIVE'];
 const FINISHED_SHORT_CODES = ['FT', 'AET', 'PEN'];
-const TOP_LEAGUES_REGEX = /premier league|la liga|serie a|bundesliga|ligue 1|uefa champions league|ucl|world cup|fifa world cup|wc qualifiers|international|friendly|qualifiers|nations league|euro|copa america|afcon/i;
+const TOP_LEAGUES_REGEX = /^(premier league|la liga|serie a|bundesliga|ligue 1|uefa champions league|ucl|world cup|fifa world cup|wc qualifiers|international|friendly|qualifiers|nations league|euro|copa america|afcon)$/i;
 
 const getApiKeys = () => {
-  const primary = process.env.FOOTBALL_API_KEY || '';
-  const multiple = process.env.FOOTBALL_API_KEYS || '';
-  const combined = `${primary},${multiple}`;
-  return [...new Set(combined.split(',').map(k => k.trim()).filter(Boolean))];
+  const keys = (process.env.FOOTBALL_API_KEY || '') + ',' + (process.env.FOOTBALL_API_KEYS || '');
+  return [...new Set(keys.split(',').map(k => k.trim()).filter(Boolean))];
 };
 
 const fetchWithRotation = async (endpoint) => {
   const keys = getApiKeys();
-  for (let key of keys) {
+  for (const [index, key] of keys.entries()) {
     try {
       const res = await fetch(`https://v3.football.api-sports.io/${endpoint}`, {
         headers: { 'x-apisports-key': key }
@@ -30,9 +28,9 @@ const fetchWithRotation = async (endpoint) => {
         return data;
       }
 
-      console.log(`LiveService: Key ${key.slice(0, 5)}... issue detected, trying next...`);
+      console.warn(`LiveService: Key ${index + 1} issue detected, trying next...`);
     } catch (err) {
-      console.error(`Error with key ${key.slice(0, 5)}:`, err.message);
+      console.error(`LiveService: Error with key ${index + 1}:`, err.message);
     }
   }
   return { errors: { requests: "All API keys reached their daily limit." } };

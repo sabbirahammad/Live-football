@@ -3,30 +3,38 @@ import Match from '../models/Match.js';
 
 // একাধিক API কী হ্যান্ডেল করার জন্য হেল্পার
 const getApiKeys = () => {
-  const primary = process.env.FOOTBALL_API_KEY || '';
-  const multiple = process.env.FOOTBALL_API_KEYS || '';
-  const combined = `${primary},${multiple}`;
-  return [...new Set(combined.split(',').map(k => k.trim()).filter(Boolean))];
+  const keys = (process.env.FOOTBALL_API_KEY || '') + ',' + (process.env.FOOTBALL_API_KEYS || '');
+  return [...new Set(keys.split(',').map(k => k.trim()).filter(Boolean))];
 };
 
 // কমন ফেচ লজিক যা কী রোটেশন সাপোর্ট করে
 const fetchWithRotation = async (endpoint) => {
   const keys = getApiKeys();
-  for (let key of keys) {
-    const res = await fetch(`https://v3.football.api-sports.io/${endpoint}`, {
-      headers: { 'x-apisports-key': key }
-    });
-    const data = await res.json();
-
-    // যদি কোনো এরর না থাকে এবং রেসপন্স ডেটা থাকে, তবেই রিটার্ন করবে
-    if ((!data.errors || Object.keys(data.errors).length === 0) && data.response) {
-      return data;
-    }
-
-    const errorMsg = data.errors ? JSON.stringify(data.errors) : "Empty response";
-    console.log(`API Key ${key.slice(0, 5)}... issue: ${errorMsg}. Trying next key...`);
+  if (keys.length === 0) {
+    console.error("❌ No API Keys found in .env!");
+    return { errors: { config: "No API keys configured" } };
   }
-  return { errors: { requests: "All API keys reached their daily limit." } };
+
+  for (const [index, key] of keys.entries()) {
+    try {
+      console.log(`📡 [API Rotation] Trying Key ${index + 1}/${keys.length}: ${key.slice(0, 5)}...`);
+      const res = await fetch(`https://v3.football.api-sports.io/${endpoint}`, {
+        headers: { 'x-apisports-key': key }
+      });
+      const data = await res.json();
+
+      // যদি কোনো এরর না থাকে এবং রেসপন্স ডেটা থাকে, তবেই রিটার্ন করবে
+      if ((!data.errors || Object.keys(data.errors).length === 0) && data.response) {
+        return data;
+      }
+
+      const errorMsg = data.errors ? JSON.stringify(data.errors) : "Empty response";
+      console.warn(`⚠️ Key ${index + 1} issue: ${errorMsg}`);
+    } catch (err) {
+      console.error(`❌ Key ${index + 1} fetch error:`, err.message);
+    }
+  }
+  return { errors: { requests: "All API keys reached their daily limit or are invalid." }, response: [] };
 };
 
 // Helper function to generate realistic and consistent player prices based on their position
