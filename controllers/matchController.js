@@ -11,6 +11,11 @@ let matchCache = {
   lastFetch: 0
 };
 const CACHE_TTL = 15 * 1000; // 15 seconds cache TTL
+
+// ✅ টপ লিগগুলোর নির্দিষ্ট ID (League ID) তালিকা এবং নামের রেজেক্স
+const TOP_LEAGUE_IDS = [1, 2, 3, 4, 5, 9, 15, 39, 61, 78, 135, 140, 31, 32, 33, 34, 35, 10]; 
+const TOP_LEAGUES_REGEX = /^(premier league|la liga|serie a|bundesliga|ligue 1|uefa champions league|ucl|world cup|fifa world cup|wc qualifiers|international|friendly|qualifiers|nations league|euro|copa america|afcon)$/i;
+
 export const clearMatchCache = () => {
   matchCache.lastFetch = 0; // ফোর্স রিলোড করার জন্য
 };
