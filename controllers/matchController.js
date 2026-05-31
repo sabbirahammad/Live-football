@@ -265,15 +265,17 @@ export const getMatches = async (req, res) => {
       return res.status(200).json(matchCache.data);
     }
 
-    // Remove old dummy matches without fixtureId from database to prevent polluting
-    await Match.deleteMany({ fixtureId: null });
+    // 🧹 ডাটাবেস ক্লিনআপ: ফিক্সচার আইডি নেই অথবা যেগুলো টপ লিগ নয় সেগুলো ডিলিট করা
+    await Match.deleteMany({ 
+      $or: [
+        { fixtureId: null },
+        { league: { $not: TOP_LEAGUES_REGEX } } // যেগুলো টপ লিগের নামের সাথে মিলে না
+      ]
+    });
     
-    // শুধুমাত্র আপনার পছন্দের টপ লিগগুলো ফিল্টার করার জন্য রেজেক্স (Regex)
-    const topLeaguesRegex = /^(premier league|la liga|serie a|bundesliga|ligue 1|uefa champions league|ucl|world cup|fifa world cup|wc qualifiers|international|friendly|qualifiers|nations league|euro|copa america|afcon)$/i;
-
     // ডাটাবেস থেকে শুধুমাত্র এই লিগের ম্যাচগুলো আনা হবে
     const matches = await Match.find({
-      league: { $regex: topLeaguesRegex }
+      league: { $regex: TOP_LEAGUES_REGEX }
     }).sort({ matchTime: 1 });
 
     // নতুন ডেটা ক্যাশে সেভ করা হচ্ছে
@@ -341,11 +343,12 @@ export const syncMatches = async (req, res) => {
     const data = await fetchWithRotation(`fixtures?date=${today}`);
 
     if (data.response && data.response.length > 0) {
-      const topLeaguesRegex = /^(premier league|la liga|serie a|bundesliga|ligue 1|uefa champions league|ucl|world cup|fifa world cup|wc qualifiers|international|friendly|qualifiers|nations league|euro|copa america|afcon)$/i;
-      
-      // সিঙ্ক করার সময়ও শুধুমাত্র নির্দিষ্ট লিগের ম্যাচগুলোই ফিল্টার করা হবে
+      // ✅ আইডি এবং নাম—উভয়ভাবেই ফিল্টার করা হচ্ছে যাতে ভুল ম্যাচ না ঢুকে
       const filteredResponse = data.response.filter(item => 
-        topLeaguesRegex.test(item.league.name)
+        TOP_LEAGUE_IDS.includes(item.league.id) || 
+        (TOP_LEAGUES_REGEX.test(item.league.name) && 
+         !item.league.name.includes(' 2') && 
+         !item.league.name.includes('Division'))
       );
 
       if (filteredResponse.length > 0) {
@@ -382,7 +385,7 @@ export const syncMatches = async (req, res) => {
               awayTeamApiId: item.teams.away.id,
               awayLogo: item.teams.away.logo || '', homeScore: item.goals.home || 0,
               awayScore: item.goals.away || 0, status: status,
-              matchTime: new Date(item.fixture.date), league: item.league.name,
+              matchTime: new Date(item.fixture.date), league: item.league.name, leagueId: item.league.id,
               minute: item.fixture.status.elapsed ? `${item.fixture.status.elapsed}'` : "0'",
               roomsCount: Math.floor(Math.random() * 10) + 1
             });

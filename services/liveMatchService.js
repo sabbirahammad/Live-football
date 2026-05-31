@@ -9,6 +9,7 @@ import { clearLeaderboardCache } from '../controllers/leaderboardController.js';
 const LIVE_SHORT_CODES = ['1H', '2H', 'HT', 'ET', 'P', 'LIVE'];
 const FINISHED_SHORT_CODES = ['FT', 'AET', 'PEN'];
 const TOP_LEAGUES_REGEX = /^(premier league|la liga|serie a|bundesliga|ligue 1|uefa champions league|ucl|world cup|fifa world cup|wc qualifiers|international|friendly|qualifiers|nations league|euro|copa america|afcon)$/i;
+const TOP_LEAGUE_IDS = [1, 2, 3, 4, 5, 9, 15, 39, 61, 78, 135, 140, 10];
 
 const getApiKeys = () => {
   const keys = (process.env.FOOTBALL_API_KEY || '') + ',' + (process.env.FOOTBALL_API_KEYS || '');
@@ -317,7 +318,9 @@ export const syncMatchesFromApi = async (io, options = {}) => {
     new Map(mergedResponse.map((item) => [item.fixture.id, item])).values()
   );
   const filteredResponse = dedupedResponse.filter(item => 
-    TOP_LEAGUES_REGEX.test(item.league.name)
+    TOP_LEAGUE_IDS.includes(item.league.id) || 
+    (TOP_LEAGUES_REGEX.test(item.league.name) && 
+     !item.league.name.includes(' 2') && !item.league.name.includes('Division'))
   );
   const finishedMatchIds = [];
 
