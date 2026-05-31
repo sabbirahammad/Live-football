@@ -11,6 +11,9 @@ const FINISHED_SHORT_CODES = ['FT', 'AET', 'PEN'];
 const TOP_LEAGUES_REGEX = /^(premier league|la liga|serie a|bundesliga|ligue 1|uefa champions league|ucl|world cup|fifa world cup|wc qualifiers|international|friendly|qualifiers|nations league|euro|copa america|afcon)$/i;
 const TOP_LEAGUE_IDS = [1, 2, 3, 4, 5, 9, 15, 39, 61, 78, 135, 140, 10];
 
+// 🚫 বাদ দেওয়া হবে এমন কি-ওয়ার্ড (Exclusion logic consistent with matchController)
+const EXCLUDED_LEAGUES_REGEX = /(league b|league c|league d|division 2|division 3|division 4|serie b|2\. bundesliga|segunda|u21|u23|u19|youth|reserve|relegation|play-offs)/i;
+
 const getApiKeys = () => {
   const keys = (process.env.FOOTBALL_API_KEY || '') + ',' + (process.env.FOOTBALL_API_KEYS || '');
   return [...new Set(keys.split(',').map(k => k.trim()).filter(Boolean))];
@@ -319,8 +322,7 @@ export const syncMatchesFromApi = async (io, options = {}) => {
   );
   const filteredResponse = dedupedResponse.filter(item => 
     TOP_LEAGUE_IDS.includes(item.league.id) || 
-    (TOP_LEAGUES_REGEX.test(item.league.name) && 
-     !item.league.name.includes(' 2') && !item.league.name.includes('Division'))
+    (TOP_LEAGUES_REGEX.test(item.league.name) && !EXCLUDED_LEAGUES_REGEX.test(item.league.name))
   );
   const finishedMatchIds = [];
 

@@ -277,7 +277,8 @@ export const getMatches = async (req, res) => {
     await Match.deleteMany({ 
       $or: [
         { fixtureId: null },
-        { league: { $not: TOP_LEAGUES_REGEX } } // যেগুলো টপ লিগের নামের সাথে মিলে না
+        { league: { $not: TOP_LEAGUES_REGEX } }, // যেগুলো টপ লিগের কি-ওয়ার্ডের বাইরে
+        { league: { $regex: EXCLUDED_LEAGUES_REGEX } } // অথবা যেগুলো নিষিদ্ধ কি-ওয়ার্ডের ভেতরে (League B, C etc.)
       ]
     });
     
