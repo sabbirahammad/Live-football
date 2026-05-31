@@ -297,6 +297,34 @@ export const getMatches = async (req, res) => {
   }
 };
 
+// @desc    Manual cleanup of database (Delete old and lower tier matches)
+// @route   POST /api/matches/cleanup
+// @access  Admin/Private
+export const manualCleanup = async (req, res) => {
+  try {
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+
+    const result = await Match.deleteMany({
+      $or: [
+        { fixtureId: null },
+        { league: { $not: TOP_LEAGUES_REGEX } },
+        { league: { $regex: EXCLUDED_LEAGUES_REGEX } },
+        { status: 'Finished', matchTime: { $lt: yesterday } }
+      ]
+    });
+
+    clearMatchCache();
+    res.status(200).json({ 
+      success: true, 
+      message: 'Database cleanup completed successfully', 
+      deletedCount: result.deletedCount 
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Cleanup failed', error: error.message });
+  }
+};
+
 // @desc    Simulate a live event (For testing socket.io)
 // @route   POST /api/matches/simulate
 // @access  Public
