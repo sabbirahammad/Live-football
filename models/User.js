@@ -9,6 +9,7 @@ const userSchema = new mongoose.Schema({
   totalPoints: { type: Number, default: 0 },
   weeklyPoints: { type: Number, default: 0 },
   globalRank: { type: Number, default: 0 },
+  isAdmin: { type: Boolean, default: false },
   wins: { type: Number, default: 0 },
   coinBalance: { type: Number, default: 500 },
   lastDailyClaim: { type: Date },
@@ -17,6 +18,16 @@ const userSchema = new mongoose.Schema({
   referredByCode: { type: String, default: null },
   referralBonusPaid: { type: Boolean, default: false },
   referralCount: { type: Number, default: 0 },
+  activeBackground: { type: String, default: '' },
+  ownedBackgrounds: { type: [String], default: [] },
+  customShopBackgrounds: [
+    {
+      id: { type: String },
+      name: { type: String },
+      url: { type: String },
+      costCoins: { type: Number, default: 50 },
+    }
+  ],
   ownedJerseys: [
     {
       jerseyId: { type: String, required: true },

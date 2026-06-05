@@ -32,6 +32,12 @@ const SHOP_JERSEYS = [
 
 const SHOP_JERSEY_SIZES = ['S', 'M', 'L', 'XL'];
 
+const DEFAULT_SHOP_BACKGROUNDS = [
+  { id: 'messi-01', name: 'Lionel Messi Gold', url: 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?q=80&w=500', costCoins: 50 },
+  { id: 'ronaldo-01', name: 'CR7 Monster', url: 'https://images.unsplash.com/photo-1508098682722-e99c43a406b2?q=80&w=500', costCoins: 50 },
+  { id: 'neymar-01', name: 'Neymar Jr Skill', url: 'https://images.unsplash.com/photo-1518091043644-c1d445bb5196?q=80&w=500', costCoins: 50 },
+];
+
 const buildReferralCode = (user) => {
   const namePart = (user.name || 'GOAL')
     .replace(/[^A-Za-z0-9]/g, '')
@@ -74,6 +80,7 @@ const buildUserPayload = (user) => ({
   phone: user.phone,
   profilePicture: user.profilePicture || '',
   coinBalance: user.coinBalance || 0,
+  activeBackground: user.activeBackground || '',
   totalPoints: user.totalPoints || 0,
   weeklyPoints: user.weeklyPoints || 0,
   wins: user.wins || 0,
@@ -123,6 +130,10 @@ const buildShopOffers = (user) => {
 const buildShopPayload = (user) => {
   const tier = buildMembershipTier(user);
   const ownedIds = new Set((user.ownedJerseys || []).map(item => item.jerseyId));
+  const ownedBgIds = new Set(user.ownedBackgrounds || []);
+  
+  // Admin uploaded backgrounds will be combined with defaults
+  const allBackgrounds = [...DEFAULT_SHOP_BACKGROUNDS, ...(user.customShopBackgrounds || [])];
 
   return {
     currentTier: tier,
@@ -140,6 +151,11 @@ const buildShopPayload = (user) => {
       owned: ownedIds.has(jersey.id),
       sizeOptions: SHOP_JERSEY_SIZES,
       canExchange: (user.coinBalance || 0) >= jersey.costCoins && !ownedIds.has(jersey.id),
+    })),
+    backgrounds: allBackgrounds.map(bg => ({
+      ...bg,
+      owned: ownedBgIds.has(bg.id),
+      canBuy: (user.coinBalance || 0) >= bg.costCoins && !ownedBgIds.has(bg.id),
     })),
     ownedJerseys: (user.ownedJerseys || []).map(item => ({
       jerseyId: item.jerseyId,
@@ -575,6 +591,93 @@ export const updateProfilePicture = async (req, res) => {
     res.json(buildUserPayload(updatedUser));
   } catch (error) {
     res.status(500).json({ message: 'Server error updating profile picture', error: error.message });
+  }
+};
+
+// @desc    Purchase a profile background
+// @route   POST /api/auth/shop/purchase-background
+// @access  Private
+export const purchaseShopBackground = async (req, res) => {
+  try {
+    const { backgroundId } = req.body;
+    const user = await User.findById(req.user._id);
+    
+    // Combine defaults and custom for verification
+    const allBgs = [...DEFAULT_SHOP_BACKGROUNDS, ...(user.customShopBackgrounds || [])];
+    const bg = allBgs.find(item => item.id === backgroundId);
+
+    if (!bg) return res.status(404).json({ message: 'Background not found' });
+    if ((user.ownedBackgrounds || []).includes(backgroundId)) {
+      return res.status(400).json({ message: 'You already own this background' });
+    }
+    if ((user.coinBalance || 0) < bg.costCoins) {
+      return res.status(400).json({ message: 'Insufficient coins' });
+    }
+
+    user.coinBalance -= bg.costCoins;
+    user.ownedBackgrounds = user.ownedBackgrounds || [];
+    user.ownedBackgrounds.push(backgroundId);
+    user.activeBackground = bg.url; // Auto set as active
+    
+    await user.save();
+
+    res.status(200).json({
+      message: 'Background purchased successfully!',
+      coinBalance: user.coinBalance,
+      activeBackground: user.activeBackground,
+      shop: buildShopPayload(user)
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Error purchasing background', error: error.message });
+  }
+};
+
+// @desc    Set active background
+// @route   PUT /api/auth/profile/background
+// @access  Private
+export const setActiveBackground = async (req, res) => {
+  try {
+    const { backgroundUrl, backgroundId } = req.body;
+    const user = await User.findById(req.user._id);
+    
+    if (!user.ownedBackgrounds.includes(backgroundId) && backgroundId !== 'default') {
+      return res.status(403).json({ message: 'You do not own this background' });
+    }
+
+    user.activeBackground = backgroundId === 'default' ? '' : backgroundUrl;
+    await user.save();
+    
+    res.json({ message: 'Background updated', activeBackground: user.activeBackground });
+  } catch (error) {
+    res.status(500).json({ message: 'Error setting background' });
+  }
+};
+
+// @desc    Admin: Add new background to shop (Global for all users)
+// @route   POST /api/auth/admin/shop/background
+// @access  Private/Admin (Assuming Admin check in middleware or via special token)
+export const adminAddShopBackground = async (req, res) => {
+  try {
+    const { name, url, costCoins } = req.body;
+    if (!name || !url) return res.status(400).json({ message: 'Missing fields' });
+
+    const newBg = {
+      id: `custom-${Date.now()}`,
+      name,
+      url,
+      costCoins: costCoins || 50
+    };
+
+    // This adds it globally to all users' shop view by pushing to a central config or 
+    // in this simple case, updating all users (not efficient but works for small apps)
+    // Better approach: Store these in a separate 'ShopItem' collection.
+    await User.updateMany({}, { 
+      $push: { customShopBackgrounds: newBg } 
+    });
+
+    res.status(201).json({ message: 'Background added to shop successfully', newBg });
+  } catch (error) {
+    res.status(500).json({ message: 'Admin error', error: error.message });
   }
 };
 

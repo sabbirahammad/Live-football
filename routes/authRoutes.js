@@ -11,6 +11,9 @@ import {
   createShopPurchaseRequest,
   deleteUserProfile,
   markNotificationsRead,
+  purchaseShopBackground,
+  setActiveBackground,
+  adminAddShopBackground
 } from '../controllers/authController.js';
 import { protect } from '../middleware/authMiddleware.js';
 
@@ -27,5 +30,8 @@ router.delete('/profile', protect, deleteUserProfile);
 router.post('/shop/exchange-jersey', protect, exchangeShopJersey);
 router.post('/shop/purchase-request', protect, createShopPurchaseRequest);
 router.put('/notifications/read', protect, markNotificationsRead);
+router.post('/shop/purchase-background', protect, purchaseShopBackground);
+router.put('/profile/background', protect, setActiveBackground);
+router.post('/admin/shop/background', protect, admin, adminAddShopBackground);
 
 export default router;
