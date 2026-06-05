@@ -4,18 +4,21 @@ import User from '../models/User.js';
 export const protect = async (req, res, next) => {
   let token;
 
-  if (
-    req.headers.authorization &&
-    req.headers.authorization.startsWith('Bearer')
-  ) {
-    try {
-      // Get token from header
-      token = req.headers.authorization.split(' ')[1];
+  if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
+    token = req.headers.authorization.split(' ')[1];
+  }
 
-      // Check if token is empty or the literal string "undefined"/"null" from frontend storage
-      if (!token || token === 'undefined' || token === 'null') {
-        return res.status(401).json({ message: 'Not authorized, invalid token format' });
-      }
+  // ১. টোকেন না থাকলে বা ভুল ফরম্যাটে থাকলে শুরুতেই আটকে দেওয়া
+  if (!token || token === 'undefined' || token === 'null' || token === '') {
+    return res.status(401).json({ message: 'Not authorized, no token' });
+  }
+
+  try {
+    // ২. JWT এর বেসিক স্ট্রাকচার চেক (Header.Payload.Signature)
+    // এটি না থাকলে jwt.verify "jwt malformed" এরর থ্রো করে
+    if (token.split('.').length !== 3) {
+      return res.status(401).json({ message: 'Not authorized, invalid token format' });
+    }
 
       // Verify token
       const decoded = jwt.verify(token, process.env.JWT_SECRET || 'goaladda_secret_key');
@@ -23,15 +26,14 @@ export const protect = async (req, res, next) => {
       // Get user from the token
       req.user = await User.findById(decoded.id).select('-password');
 
-      next();
-    } catch (error) {
-      console.error(error);
-      res.status(401).json({ message: 'Not authorized, token failed' });
-    }
-  }
+      if (!req.user) {
+        return res.status(401).json({ message: 'Not authorized, user not found' });
+      }
 
-  if (!token) {
-    res.status(401).json({ message: 'Not authorized, no token' });
+      next();
+  } catch (error) {
+    console.error('Auth Error:', error.message);
+    return res.status(401).json({ message: 'Not authorized, token failed' });
   }
 };
 

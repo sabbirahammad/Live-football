@@ -1,5 +1,6 @@
 import express from 'express';
-import { getShopItems, buyShopItem, addShopItem, deleteShopItem } from '../controllers/shopController.js';
+// লজিক যেহেতু authController এ আছে, এখান থেকে ইম্পোর্ট করা ভালো অথবা shopController এ মুভ করা ভালো
+import { getShopOverview as getShopItems, purchaseShopBackground as buyShopItem } from '../controllers/authController.js';
 import { protect } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
