@@ -13,6 +13,7 @@ const matchSchema = new mongoose.Schema({
   matchTime: { type: Date, required: true },
   league: { type: String, required: true },
   minute: { type: String, default: "0'" }, // Live ম্যাচের সময় (যেমন: 72')
+  isFeatured: { type: Boolean, default: false }, // পিন করার জন্য নতুন ফিল্ড
   roomsCount: { type: Number, default: 0 }, // এই ম্যাচের আন্ডারে কয়টি ফ্যান্টাসি রুম খোলা হয়েছে
   fixtureId: { type: Number }, // From API-Football
   players: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Player' }] // Players in this match

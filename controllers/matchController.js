@@ -24,6 +24,25 @@ export const clearMatchCache = () => {
   matchCache.lastFetch = 0; // ফোর্স রিলোড করার জন্য
 };
 
+// ✅ একটি নির্দিষ্ট ম্যাচকে Featured হিসেবে পিন করা (Admin Only)
+export const setFeaturedMatch = async (req, res) => {
+  const { id } = req.params;
+  const { isFeatured } = req.body; // true or false
+
+  try {
+    // যদি নতুন কোনো ম্যাচকে পিন করা হয়, তবে আগের পিন করা ম্যাচটি আন-পিন করে দেওয়া হবে
+    if (isFeatured) {
+      await Match.updateMany({ isFeatured: true }, { $set: { isFeatured: false } });
+    }
+
+    const match = await Match.findByIdAndUpdate(id, { isFeatured }, { new: true });
+    clearMatchCache();
+    res.status(200).json({ message: isFeatured ? 'Match pinned successfully' : 'Match unpinned', match });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 const fetchWithRotation = async (endpoint) => {
   const keys = ((process.env.FOOTBALL_API_KEY || '') + ',' + (process.env.FOOTBALL_API_KEYS || ''))
     .split(',').map(k => k.trim()).filter(Boolean);
@@ -372,7 +391,7 @@ export const getMatches = async (req, res) => {
     // ডাটাবেস থেকে শুধুমাত্র এই লিগের ম্যাচগুলো আনা হবে
     const matches = await Match.find({
       $or: [{ league: { $regex: TOP_LEAGUES_REGEX } }, { leagueId: { $in: manualIds } }]
-    }).sort({ matchTime: 1 });
+    }).sort({ isFeatured: -1, matchTime: 1 }); // Featured ম্যাচটি সবার আগে আসবে
 
     // নতুন ডেটা ক্যাশে সেভ করা হচ্ছে
     matchCache.data = matches;

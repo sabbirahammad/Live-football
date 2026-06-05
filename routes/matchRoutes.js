@@ -1,5 +1,6 @@
 import express from 'express';
-import { getMatches, manualCleanup, proxyFootballData, simulateLiveEvent, syncMatches, getAllowedLeagues, addAllowedLeague, removeAllowedLeague } from '../controllers/matchController.js';
+import { getMatches, manualCleanup, proxyFootballData, simulateLiveEvent, syncMatches, getAllowedLeagues, addAllowedLeague, removeAllowedLeague, setFeaturedMatch } from '../controllers/matchController.js';
+import { protect, admin } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
@@ -8,6 +9,7 @@ router.get('/proxy/:resource', proxyFootballData);
 router.post('/simulate', simulateLiveEvent);
 router.post('/sync', syncMatches);
 router.post('/cleanup', manualCleanup);
+router.put('/featured/:id', protect, admin, setFeaturedMatch);
 
 // Manual League Allowance Routes
 router.get('/allowed-leagues', getAllowedLeagues);
