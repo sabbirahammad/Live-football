@@ -186,7 +186,7 @@ export const getLeaderboard = async (req, res) => {
       return res.status(200).json(leaderboardCache.global.data);
     }
 
-    const users = await User.find({ totalPoints: { $gt: 0 } })
+    const users = await User.find({})
       .sort(GLOBAL_SORT)
       .select('name totalPoints globalRank profilePicture coinBalance')
       .limit(50);
@@ -248,7 +248,7 @@ export const getWeeklyLeaderboard = async (req, res) => {
       return res.status(200).json(leaderboardCache.weekly.data);
     }
 
-    const users = await User.find({ weeklyPoints: { $gt: 0 } })
+    const users = await User.find({})
       .sort(WEEKLY_SORT)
       .select('name weeklyPoints totalPoints globalRank profilePicture coinBalance')
       .limit(50);
