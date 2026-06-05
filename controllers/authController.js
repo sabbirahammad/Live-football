@@ -12,13 +12,13 @@ const SHOP_PAYMENT_METHODS = [
   {
     id: 'bkash',
     label: 'bKash',
-    accountNumber: '01711-223344',
+    accountNumber: '01321521548',
     accountName: 'Goal Adda Shop',
   },
   {
     id: 'nagad',
     label: 'Nagad',
-    accountNumber: '01888-556677',
+    accountNumber: '01321521548',
     accountName: 'Goal Adda Shop',
   },
 ];
