@@ -15,7 +15,7 @@ import {
   setActiveBackground,
   adminAddShopBackground
 } from '../controllers/authController.js';
-import { protect } from '../middleware/authMiddleware.js';
+import { protect, admin } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
