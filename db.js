@@ -2,7 +2,12 @@ import mongoose from 'mongoose';
 
 const connectDB = async () => {
   try {
-    const conn = await mongoose.connect(process.env.MONGO_URI);
+    const conn = await mongoose.connect(process.env.MONGO_URI, {
+      serverSelectionTimeoutMS: 5000, // Fail fast (5s) instead of hanging for 30s
+      socketTimeoutMS: 45000,
+      family: 4 // Force IPv4 if IPv6 is causing issues with Atlas
+    });
+
     console.log(`✅ MongoDB Connected: ${conn.connection.host}`);
 
     const usersCollection = conn.connection.collection('users');

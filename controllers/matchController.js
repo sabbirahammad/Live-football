@@ -366,10 +366,12 @@ export const processAutoSubsAndRewards = async (matchId) => {
 // @route   GET /api/matches
 // @access  Public
 export const getMatches = async (req, res) => {
+  const { admin } = req.query; // অ্যাডমিন প্যানেল থেকে আসলে ?admin=true থাকবে
   try {
     const now = Date.now();
-    // ক্যাশে ডেটা থাকলে এবং ১৫ সেকেন্ড পার না হলে সরাসরি ক্যাশ থেকে ডেটা রিটার্ন করা হবে (Lightning Fast ⚡)
-    if (matchCache.data && (now - matchCache.lastFetch < CACHE_TTL)) {
+    
+    // পাবলিক অ্যাপের রিকোয়েস্ট হলে ক্যাশ ব্যবহার করা হবে
+    if (!admin && matchCache.data && (now - matchCache.lastFetch < CACHE_TTL)) {
       return res.status(200).json(matchCache.data);
     }
 
@@ -377,29 +379,62 @@ export const getMatches = async (req, res) => {
     const manualLeagues = await AllowedLeague.find().select('leagueId');
     const manualIds = manualLeagues.map(l => l.leagueId);
 
-    // 🧹 ডাটাবেস ক্লিনআপ: ফিক্সচার আইডি নেই অথবা যেগুলো টপ লিগ নয় সেগুলো ডিলিট করা
-    await Match.deleteMany({ 
-      $or: [
-        { fixtureId: null },
-        { $and: [
-          { leagueId: { $nin: manualIds } }, // যদি ম্যানুয়াল লিস্টে না থাকে
-          { $or: [{ league: { $not: TOP_LEAGUES_REGEX } }, { league: { $regex: EXCLUDED_LEAGUES_REGEX } }] }
-        ]}
-      ]
-    });
-    
-    // ডাটাবেস থেকে শুধুমাত্র এই লিগের ম্যাচগুলো আনা হবে
-    const matches = await Match.find({
-      $or: [{ league: { $regex: TOP_LEAGUES_REGEX } }, { leagueId: { $in: manualIds } }]
-    }).sort({ isFeatured: -1, matchTime: 1 }); // Featured ম্যাচটি সবার আগে আসবে
+    // Note: deleteMany removed from here. 
+    // Heavy write operations should never run inside a high-frequency GET route.
+    // Use the /api/matches/cleanup route or a cron job instead.
 
-    // নতুন ডেটা ক্যাশে সেভ করা হচ্ছে
-    matchCache.data = matches;
-    matchCache.lastFetch = now;
+    // Admin হলে সব ম্যাচ দেখাবে, নতুবা শুধু ফিল্টার করা টপ লিগ
+    const matchFilter = admin ? {} : {
+      $or: [{ league: { $regex: TOP_LEAGUES_REGEX } }, { leagueId: { $in: manualIds } }]
+    };
+    
+    const matches = await Match.find(matchFilter).sort({ isFeatured: -1, matchTime: 1 });
+
+    if (!admin) {
+      matchCache.data = matches;
+      matchCache.lastFetch = now;
+    }
 
     res.status(200).json(matches);
   } catch (error) {
     res.status(500).json({ message: 'Server error fetching matches', error: error.message });
+  }
+};
+
+// @desc    Search/Suggest matches for admin live streams page
+// @route   GET /api/matches/search
+// @access  Admin/Private
+export const searchMatches = async (req, res) => {
+  const { q } = req.query;
+  try {
+    if (!q || q.trim() === '') return res.status(200).json([]);
+    
+    // লাইভ এবং আপকামিং ম্যাচগুলো সার্চ করা হচ্ছে
+    let matches = await Match.find({
+      $or: [
+        { homeTeam: { $regex: q, $options: 'i' } },
+        { awayTeam: { $regex: q, $options: 'i' } },
+        { league: { $regex: q, $options: 'i' } }
+      ],
+      status: { $ne: 'Finished' } // শেষ হয়ে যাওয়া ম্যাচগুলো সাজেশনে আসবে না
+    }).limit(15);
+
+    // সাজেশন প্রায়োরিটি: ১. লাইভ ম্যাচ, ২. সার্চ টেক্সট দিয়ে শুরু হওয়া টিম
+    matches.sort((a, b) => {
+      if (a.status === 'Live' && b.status !== 'Live') return -1;
+      if (a.status !== 'Live' && b.status === 'Live') return 1;
+      
+      const aStarts = a.homeTeam.toLowerCase().startsWith(q.toLowerCase()) || a.awayTeam.toLowerCase().startsWith(q.toLowerCase());
+      const bStarts = b.homeTeam.toLowerCase().startsWith(q.toLowerCase()) || b.awayTeam.toLowerCase().startsWith(q.toLowerCase());
+      if (aStarts && !bStarts) return -1;
+      if (!aStarts && bStarts) return 1;
+
+      return new Date(a.matchTime) - new Date(b.matchTime);
+    });
+
+    res.status(200).json(matches.slice(0, 10));
+  } catch (error) {
+    res.status(500).json({ message: 'Search suggestion failed', error: error.message });
   }
 };
 
