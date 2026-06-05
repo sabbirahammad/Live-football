@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import Match from '../models/Match.js';
 import FantasyTeam from '../models/FantasyTeam.js';
 import User from '../models/User.js';
@@ -28,6 +29,10 @@ export const clearMatchCache = () => {
 export const setFeaturedMatch = async (req, res) => {
   const { id } = req.params;
   const { isFeatured } = req.body; // true or false
+
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return res.status(400).json({ message: 'Invalid Match ID format' });
+  }
 
   try {
     // যদি নতুন কোনো ম্যাচকে পিন করা হয়, তবে আগের পিন করা ম্যাচটি আন-পিন করে দেওয়া হবে
@@ -366,12 +371,12 @@ export const processAutoSubsAndRewards = async (matchId) => {
 // @route   GET /api/matches
 // @access  Public
 export const getMatches = async (req, res) => {
-  const { admin } = req.query; // অ্যাডমিন প্যানেল থেকে আসলে ?admin=true থাকবে
+  const { admin, q } = req.query; // অ্যাডমিন প্যানেল থেকে আসলে ?admin=true থাকবে, সার্চের জন্য q
   try {
     const now = Date.now();
     
-    // পাবলিক অ্যাপের রিকোয়েস্ট হলে ক্যাশ ব্যবহার করা হবে
-    if (!admin && matchCache.data && (now - matchCache.lastFetch < CACHE_TTL)) {
+    // পাবলিক অ্যাপের রিকোয়েস্ট এবং সার্চ না থাকলে ক্যাশ ব্যবহার করা হবে
+    if (!admin && !q && matchCache.data && (now - matchCache.lastFetch < CACHE_TTL)) {
       return res.status(200).json(matchCache.data);
     }
 
@@ -383,11 +388,23 @@ export const getMatches = async (req, res) => {
     // Heavy write operations should never run inside a high-frequency GET route.
     // Use the /api/matches/cleanup route or a cron job instead.
 
-    // Admin হলে সব ম্যাচ দেখাবে, নতুবা শুধু ফিল্টার করা টপ লিগ
-    const matchFilter = admin ? {} : {
+    // ফিল্টার তৈরি করা
+    let matchFilter = admin ? {} : {
       $or: [{ league: { $regex: TOP_LEAGUES_REGEX } }, { leagueId: { $in: manualIds } }]
     };
-    
+
+    // যদি সার্চ কুয়েরি থাকে, তবে ফিল্টারে যোগ করা হবে
+    if (q) {
+      const searchQuery = {
+        $or: [
+          { homeTeam: { $regex: q, $options: 'i' } },
+          { awayTeam: { $regex: q, $options: 'i' } },
+          { league: { $regex: q, $options: 'i' } }
+        ]
+      };
+      matchFilter = admin ? searchQuery : { $and: [matchFilter, searchQuery] };
+    }
+
     const matches = await Match.find(matchFilter).sort({ isFeatured: -1, matchTime: 1 });
 
     if (!admin) {
