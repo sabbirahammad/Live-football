@@ -3,16 +3,17 @@ import Match from '../models/Match.js';
 import Player from '../models/Player.js';
 import FantasyTeam from '../models/FantasyTeam.js';
 import Room from '../models/Room.js';
+import AllowedLeague from '../models/AllowedLeague.js';
 import { processAutoSubsAndRewards } from '../controllers/matchController.js';
 import { clearLeaderboardCache } from '../controllers/leaderboardController.js';
 
 const LIVE_SHORT_CODES = ['1H', '2H', 'HT', 'ET', 'P', 'LIVE']; // No change
 const FINISHED_SHORT_CODES = ['FT', 'AET', 'PEN']; // No change
-const TOP_LEAGUES_REGEX = /(premier league|la liga|serie a|bundesliga|ligue 1|uefa champions league|ucl|world cup|fifa world cup|wc qualifiers|international|qualifiers|nations league|euro|copa america|afcon)/i; // 'friendly' removed for consistency with EXCLUDED_LEAGUES_REGEX
+const TOP_LEAGUES_REGEX = /(premier league|la liga|serie a|bundesliga|ligue 1|uefa champions league|ucl|world cup|fifa world cup|wc qualifiers|international|friendly|friendlies|qualifiers|nations league|euro|copa america|afcon)/i; // Added friendly and friendlies
 const TOP_LEAGUE_IDS = [1, 2, 3, 4, 5, 9, 15, 39, 61, 78, 135, 140, 31, 32, 33, 34, 35, 10]; // Consistent with matchController
 
 // 🚫 বাদ দেওয়া হবে এমন কি-ওয়ার্ড (Exclusion logic consistent with matchController)
-const EXCLUDED_LEAGUES_REGEX = /(league[ \-_][b-z]|division[ \-_][2-9]|tier[ \-_][2-9]|serie[ \-_][b-z]|bundesliga[ \-_]2|segunda|u[12][0-9]|youth|reserve|relegation|play-offs|amateur|regional|conference|women|cup|trophy)/i;
+const EXCLUDED_LEAGUES_REGEX = /(league[ \-_][b-z]|division[ \-_][2-9]|tier[ \-_][2-9]|serie[ \-_][b-z]|bundesliga[ \-_]2|segunda|u[12][0-9]|youth|reserve|relegation|play-offs|amateur|regional|conference|women|trophy)/i;
 
 const getApiKeys = () => {
   const keys = (process.env.FOOTBALL_API_KEY || '') + ',' + (process.env.FOOTBALL_API_KEYS || '');
@@ -320,9 +321,14 @@ export const syncMatchesFromApi = async (io, options = {}) => {
   const dedupedResponse = Array.from(
     new Map(mergedResponse.map((item) => [item.fixture.id, item])).values()
   );
+
+  const manualLeagues = await AllowedLeague.find().select('leagueId');
+  const manualIds = manualLeagues.map(l => l.leagueId);
+
   const filteredResponse = dedupedResponse.filter(item =>
-    (TOP_LEAGUE_IDS.includes(item.league.id) || TOP_LEAGUES_REGEX.test(item.league.name)) && 
-    !EXCLUDED_LEAGUES_REGEX.test(item.league.name)
+    manualIds.includes(item.league.id) || 
+    ((TOP_LEAGUE_IDS.includes(item.league.id) || TOP_LEAGUES_REGEX.test(item.league.name)) && 
+    !EXCLUDED_LEAGUES_REGEX.test(item.league.name))
   );
   const finishedMatchIds = [];
 

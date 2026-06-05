@@ -3,6 +3,7 @@ import FantasyTeam from '../models/FantasyTeam.js';
 import User from '../models/User.js';
 import Player from '../models/Player.js';
 import Room from '../models/Room.js';
+import AllowedLeague from '../models/AllowedLeague.js'; // নতুন মডেল ইম্পোর্ট
 import { clearLeaderboardCache } from './leaderboardController.js';
 
 // --- In-Memory Cache Setup ---
@@ -14,10 +15,10 @@ const CACHE_TTL = 15 * 1000; // 15 seconds cache TTL
 
 // ✅ টপ লিগগুলোর নির্দিষ্ট ID (League ID) তালিকা এবং নামের রেজেক্স
 const TOP_LEAGUE_IDS = [1, 2, 3, 4, 5, 9, 15, 39, 61, 78, 135, 140, 31, 32, 33, 34, 35, 10]; 
-const TOP_LEAGUES_REGEX = /(premier league|la liga|serie a|bundesliga|ligue 1|uefa champions league|ucl|world cup|fifa world cup|wc qualifiers|international|qualifiers|nations league|euro|copa america|afcon)/i;
+const TOP_LEAGUES_REGEX = /(premier league|la liga|serie a|bundesliga|ligue 1|uefa champions league|ucl|world cup|fifa world cup|wc qualifiers|international|friendly|friendlies|qualifiers|nations league|euro|copa america|afcon)/i;
 
 // 🚫 বাদ দেওয়া হবে এমন কি-ওয়ার্ড (Lower Divisions & Youth)
-const EXCLUDED_LEAGUES_REGEX = /(league[ \-_][b-z]|division[ \-_][2-9]|tier[ \-_][2-9]|serie[ \-_][b-z]|bundesliga[ \-_]2|segunda|u[12][0-9]|youth|reserve|relegation|play-offs|amateur|regional|conference|women|cup|trophy)/i;
+const EXCLUDED_LEAGUES_REGEX = /(league[ \-_][b-z]|division[ \-_][2-9]|tier[ \-_][2-9]|serie[ \-_][b-z]|bundesliga[ \-_]2|segunda|u[12][0-9]|youth|reserve|relegation|play-offs|amateur|regional|conference|women|trophy)/i;
 
 export const clearMatchCache = () => {
   matchCache.lastFetch = 0; // ফোর্স রিলোড করার জন্য
@@ -273,18 +274,24 @@ export const getMatches = async (req, res) => {
       return res.status(200).json(matchCache.data);
     }
 
+    // ম্যানুয়ালি এলাউ করা আইডিগুলো আনা
+    const manualLeagues = await AllowedLeague.find().select('leagueId');
+    const manualIds = manualLeagues.map(l => l.leagueId);
+
     // 🧹 ডাটাবেস ক্লিনআপ: ফিক্সচার আইডি নেই অথবা যেগুলো টপ লিগ নয় সেগুলো ডিলিট করা
     await Match.deleteMany({ 
       $or: [
         { fixtureId: null },
-        { league: { $not: TOP_LEAGUES_REGEX } }, // যেগুলো টপ লিগের কি-ওয়ার্ডের বাইরে
-        { league: { $regex: EXCLUDED_LEAGUES_REGEX } } // অথবা যেগুলো নিষিদ্ধ কি-ওয়ার্ডের ভেতরে (League B, C etc.)
+        { $and: [
+          { leagueId: { $nin: manualIds } }, // যদি ম্যানুয়াল লিস্টে না থাকে
+          { $or: [{ league: { $not: TOP_LEAGUES_REGEX } }, { league: { $regex: EXCLUDED_LEAGUES_REGEX } }] }
+        ]}
       ]
     });
     
     // ডাটাবেস থেকে শুধুমাত্র এই লিগের ম্যাচগুলো আনা হবে
     const matches = await Match.find({
-      league: { $regex: TOP_LEAGUES_REGEX }
+      $or: [{ league: { $regex: TOP_LEAGUES_REGEX } }, { leagueId: { $in: manualIds } }]
     }).sort({ matchTime: 1 });
 
     // নতুন ডেটা ক্যাশে সেভ করা হচ্ছে
@@ -297,6 +304,42 @@ export const getMatches = async (req, res) => {
   }
 };
 
+// --- Manual Allowed Leagues Management ---
+
+export const getAllowedLeagues = async (req, res) => {
+  try {
+    const leagues = await AllowedLeague.find().sort({ addedAt: -1 });
+    res.status(200).json(leagues);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+export const addAllowedLeague = async (req, res) => {
+  const { leagueId, name } = req.body;
+  try {
+    const exists = await AllowedLeague.findOne({ leagueId });
+    if (exists) return res.status(400).json({ message: 'League already allowed' });
+
+    const league = await AllowedLeague.create({ leagueId, name });
+    clearMatchCache();
+    res.status(201).json(league);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+export const removeAllowedLeague = async (req, res) => {
+  try {
+    await AllowedLeague.findByIdAndDelete(req.params.id);
+    clearMatchCache();
+    res.status(200).json({ message: 'League removed from manual allowance' });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Manual cleanup of database (Delete old and lower tier matches)
 // @desc    Manual cleanup of database (Delete old and lower tier matches)
 // @route   POST /api/matches/cleanup
 // @access  Admin/Private
@@ -380,10 +423,14 @@ export const syncMatches = async (req, res) => {
     const data = await fetchWithRotation(`fixtures?date=${today}`);
 
     if (data.response && data.response.length > 0) {
+      const manualLeagues = await AllowedLeague.find().select('leagueId');
+      const manualIds = manualLeagues.map(l => l.leagueId);
+
       // ✅ আইডি এবং নাম—উভয়ভাবেই ফিল্টার করা হচ্ছে যাতে ভুল ম্যাচ না ঢুকে
       const filteredResponse = data.response.filter(item =>
-        (TOP_LEAGUE_IDS.includes(item.league.id) || TOP_LEAGUES_REGEX.test(item.league.name)) && 
-        !EXCLUDED_LEAGUES_REGEX.test(item.league.name)
+        manualIds.includes(item.league.id) || 
+        ((TOP_LEAGUE_IDS.includes(item.league.id) || TOP_LEAGUES_REGEX.test(item.league.name)) && 
+        !EXCLUDED_LEAGUES_REGEX.test(item.league.name))
       );
 
       if (filteredResponse.length > 0) {
