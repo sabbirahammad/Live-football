@@ -7,7 +7,7 @@ const router = express.Router();
 
 // User routes
 router.get('/', protect, getShopItems);
-router.post('/buy/:itemId', protect, buyShopItem);
+router.post('/buy', protect, buyShopItem);
 
 // Admin routes - protected by both 'protect' and 'admin' middleware
 router.post('/add', protect, admin, addShopItem);
