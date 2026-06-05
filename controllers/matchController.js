@@ -258,6 +258,86 @@ export const processAutoSubsAndRewards = async (matchId) => {
       }
     }
     console.log(`✅ Auto-Subs & Rewards finished for Match: ${matchId}`);
+
+    // 5. Prize Distribution for Rooms with Entry Fees
+    const roomsToDistribute = await Room.find({ match: matchId, entryFeeAmount: { $gt: 0 }, isPrizeDistributed: false });
+
+    for (const room of roomsToDistribute) {
+      if (room.prizePool <= 0) {
+        room.isPrizeDistributed = true;
+        await room.save();
+        continue;
+      }
+
+      const roomLeaderboard = await Room.findById(room._id)
+        .populate({ path: 'members.user', select: 'name profilePicture coinBalance notifications' })
+        .populate({ path: 'members.team', select: 'totalPoints' });
+
+      if (!roomLeaderboard) continue;
+
+      const sortedMembers = roomLeaderboard.members
+        .filter(m => m.team && m.user) // Only consider members with a team and valid user
+        .sort((a, b) => (b.team?.totalPoints || 0) - (a.team?.totalPoints || 0));
+
+      // Dynamic distribution based on player count
+      const is1v1 = room.challengeType === '1v1';
+      const prizeDistribution = is1v1 
+        ? { '1st': 1.0, '2nd': 0, '3rd': 0 } 
+        : { '1st': 0.5, '2nd': 0.3, '3rd': 0.2 };
+
+      // Distribute prizes to top 3, or fewer if less than 3 players
+      if (sortedMembers.length > 0) {
+        const firstPlace = sortedMembers[0];
+        const firstPlacePrize = Math.round(room.prizePool * (prizeDistribution['1st'] || 0));
+        
+        if (firstPlace.user) {
+          firstPlace.user.coinBalance = (firstPlace.user.coinBalance || 0) + firstPlacePrize;
+          firstPlace.user.notifications.push({
+            title: "🏆 Challenge Won!",
+            message: `You won ${firstPlacePrize} coins in "${room.name}"! Points: ${firstPlace.team?.totalPoints || 0}`,
+            isRead: false,
+            createdAt: new Date()
+          });
+          if (is1v1) firstPlace.user.wins = (firstPlace.user.wins || 0) + 1;
+          await firstPlace.user.save();
+        }
+
+        // Second Place (Only if not 1v1 and has at least 2 players)
+        if (!is1v1 && sortedMembers.length > 1) {
+          const secondPlace = sortedMembers[1];
+          const secondPlacePrize = Math.round(room.prizePool * (prizeDistribution['2nd'] || 0));
+          if (secondPlace.user) {
+            secondPlace.user.coinBalance = (secondPlace.user.coinBalance || 0) + secondPlacePrize;
+            secondPlace.user.notifications.push({
+              title: "🥈 Challenge Runner-up!",
+              message: `You secured 2nd place in "${room.name}" and won ${secondPlacePrize} coins!`,
+              isRead: false,
+              createdAt: new Date()
+            });
+            await secondPlace.user.save();
+          }
+        }
+
+        // Third Place (Only if not 1v1 and has at least 3 players)
+        if (!is1v1 && sortedMembers.length > 2) {
+          const thirdPlace = sortedMembers[2];
+          const thirdPlacePrize = Math.round(room.prizePool * (prizeDistribution['3rd'] || 0));
+          if (thirdPlace.user) {
+            thirdPlace.user.coinBalance = (thirdPlace.user.coinBalance || 0) + thirdPlacePrize;
+            thirdPlace.user.notifications.push({
+              title: "🥉 Challenge Third Place!",
+              message: `You secured 3rd place in "${room.name}" and won ${thirdPlacePrize} coins!`,
+              isRead: false,
+              createdAt: new Date()
+            });
+            await thirdPlace.user.save();
+          }
+        }
+      }
+      room.isPrizeDistributed = true;
+      await room.save();
+      console.log(`✅ Prizes distributed for room: ${room.name}`);
+    }
   } catch (error) {
     console.error("❌ Error in Auto-Sub:", error);
   }

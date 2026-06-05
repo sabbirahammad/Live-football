@@ -16,9 +16,9 @@ import roomRoutes from './routes/roomRoutes.js';
 import leaderboardRoutes from './routes/leaderboardRoutes.js';
 import streamRoutes from './routes/streamRoutes.js';
 import adminStreamRoutes from './routes/adminStreamRoutes.js';
-// missing imports যোগ করা হলো (আপনার ফাইল পাথ অনুযায়ী চেক করে নিন)
 import adminUserRoutes from './routes/adminUserRoutes.js';
 import adminStatsRoutes from './routes/adminStatsRoutes.js';
+import adminPaymentRoutes from './routes/adminPaymentRoutes.js';
 import shopRoutes from './routes/shopRoutes.js';
 
 import { fetchAndSaveLiveMatches } from './services/liveMatchService.js';
@@ -68,6 +68,7 @@ app.use('/api/streams', streamRoutes);
 app.use('/api/admin/streams', adminStreamRoutes);
 app.use('/api/admin/users', adminUserRoutes);
 app.use('/api/admin/stats', adminStatsRoutes);
+app.use('/api/admin/payments', adminPaymentRoutes);
 app.use('/api/shop', shopRoutes);
 
 // বেসিক টেস্টিং রাউট

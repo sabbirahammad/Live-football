@@ -18,6 +18,14 @@ const userSchema = new mongoose.Schema({
   referredByCode: { type: String, default: null },
   referralBonusPaid: { type: Boolean, default: false },
   referralCount: { type: Number, default: 0 },
+  notifications: [
+    {
+      title: { type: String, required: true },
+      message: { type: String, required: true },
+      isRead: { type: Boolean, default: false },
+      createdAt: { type: Date, default: Date.now },
+    },
+  ],
   activeBackground: { type: String, default: '' },
   ownedBackgrounds: { type: [String], default: [] },
   customShopBackgrounds: [

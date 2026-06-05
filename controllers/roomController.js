@@ -1,6 +1,7 @@
 import Room from '../models/Room.js';
 import FantasyTeam from '../models/FantasyTeam.js';
 import Match from '../models/Match.js';
+import User from '../models/User.js';
 
 const generateCode = () => Math.random().toString(36).substring(2, 8).toUpperCase();
 
@@ -8,7 +9,7 @@ const generateCode = () => Math.random().toString(36).substring(2, 8).toUpperCas
 // @route   POST /api/rooms/create
 // @access  Private
 export const createRoom = async (req, res) => {
-  const { name, matchId, privacy, maxPlayers, challengeType, reward } = req.body;
+  const { name, matchId, privacy, maxPlayers, challengeType, reward, entryFeeAmount, entryFeeCurrency } = req.body;
 
   try {
     let match = await Match.findOne({ fixtureId: Number(matchId) });
@@ -47,7 +48,23 @@ export const createRoom = async (req, res) => {
     if (!match) return res.status(404).json({ message: 'Match not found in DB and auto-sync failed' });
     const actualMatchId = match._id;
 
-    const userTeam = await FantasyTeam.findOne({ user: req.user._id, match: actualMatchId });
+    const user = await User.findById(req.user._id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    let actualEntryFee = Number(entryFeeAmount) || 0;
+    if (entryFeeCurrency === 'jersey') {
+      actualEntryFee = 350; // Fixed cost for jersey entry
+    }
+
+    if (actualEntryFee > 0) {
+      if (user.coinBalance < actualEntryFee) {
+        return res.status(400).json({ message: `Insufficient coins. You need ${actualEntryFee} coins to create this room.` });
+      }
+      user.coinBalance -= actualEntryFee;
+      await user.save();
+    }
+
+    const userTeam = await FantasyTeam.findOne({ user: user._id, match: actualMatchId });
 
     const room = await Room.create({
       name,
@@ -56,6 +73,10 @@ export const createRoom = async (req, res) => {
       maxPlayers,
       challengeType,
       reward,
+      entryFeeAmount: actualEntryFee,
+      entryFeeCurrency,
+      prizePool: actualEntryFee, // Creator's fee goes into prize pool
+      prizeDistribution: { '1st': 0.5, '2nd': 0.3, '3rd': 0.2 }, // Default distribution
       code: generateCode(),
       createdBy: req.user._id,
       members: [{ user: req.user._id, team: userTeam ? userTeam._id : null }],
@@ -79,10 +100,21 @@ export const joinRoom = async (req, res) => {
       return res.status(404).json({ message: 'Room not found with this code' });
     }
 
-    if (room.members.some(member => member.user.equals(req.user._id))) {
+    const user = await User.findById(req.user._id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    if (room.members.some(member => member.user.equals(user._id))) {
       return res.status(400).json({ message: 'You are already in this room' });
     }
 
+    if (room.entryFeeAmount > 0) {
+      if (user.coinBalance < room.entryFeeAmount) {
+        return res.status(400).json({ message: `Insufficient coins. You need ${room.entryFeeAmount} coins to join this room.` });
+      }
+      user.coinBalance -= room.entryFeeAmount;
+      room.prizePool += room.entryFeeAmount; // Add to prize pool
+      await user.save();
+    }
     const userTeam = await FantasyTeam.findOne({ user: req.user._id, match: room.match });
     room.members.push({ user: req.user._id, team: userTeam ? userTeam._id : null });
     await room.save();
