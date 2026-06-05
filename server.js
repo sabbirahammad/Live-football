@@ -20,6 +20,7 @@ import adminUserRoutes from './routes/adminUserRoutes.js';
 import adminStatsRoutes from './routes/adminStatsRoutes.js';
 import adminPaymentRoutes from './routes/adminPaymentRoutes.js';
 import shopRoutes from './routes/shopRoutes.js';
+import appConfigRoutes from './routes/appConfigRoutes.js';
 
 import { fetchAndSaveLiveMatches } from './services/liveMatchService.js';
 import { startStreamPrefetchLoop } from './services/streamScraperService.js';
@@ -70,6 +71,7 @@ app.use('/api/admin/users', adminUserRoutes);
 app.use('/api/admin/stats', adminStatsRoutes);
 app.use('/api/admin/payments', adminPaymentRoutes);
 app.use('/api/shop', shopRoutes);
+app.use('/api/app-config', appConfigRoutes);
 
 // বেসিক টেস্টিং রাউট
 app.get('/', (req, res) => {
