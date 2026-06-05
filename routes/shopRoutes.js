@@ -1,7 +1,7 @@
 import express from 'express';
-// লজিক যেহেতু authController এ আছে, এখান থেকে ইম্পোর্ট করা ভালো অথবা shopController এ মুভ করা ভালো
-import { getShopOverview as getShopItems, purchaseShopBackground as buyShopItem } from '../controllers/authController.js';
-import { protect } from '../middleware/authMiddleware.js';
+// Import the admin-specific function and alias it to match your route usage
+import { getShopOverview as getShopItems, purchaseShopBackground as buyShopItem, adminAddShopBackground as addShopItem } from '../controllers/authController.js';
+import { protect, admin } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
@@ -9,8 +9,7 @@ const router = express.Router();
 router.get('/', protect, getShopItems);
 router.post('/buy/:itemId', protect, buyShopItem);
 
-// Admin routes (basic protection can be added later)
-router.post('/add', addShopItem);
-router.delete('/:itemId', deleteShopItem);
+// Admin routes - protected by both 'protect' and 'admin' middleware
+router.post('/add', protect, admin, addShopItem);
 
 export default router;
