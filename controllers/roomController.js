@@ -103,8 +103,13 @@ export const joinRoom = async (req, res) => {
   }
 
   try {
-    const room = await Room.findOne({ code: code.toString().toUpperCase() });
+    // Remove any non-alphanumeric characters (like hidden spaces, dashes)
+    const searchCode = code.toString().replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+    console.log(`[joinRoom] Attempting to join with code: "${searchCode}" (original: "${code}")`);
+    
+    const room = await Room.findOne({ code: searchCode });
     if (!room) {
+      console.log(`[joinRoom] Room NOT FOUND for code: "${searchCode}"`);
       return res.status(404).json({ message: 'Room not found with this code' });
     }
 
@@ -116,10 +121,11 @@ export const joinRoom = async (req, res) => {
     }
 
     if (room.entryFeeAmount > 0) {
-      if (user.coinBalance < room.entryFeeAmount) {
+      const currentCoins = user.coinBalance || 0;
+      if (currentCoins < room.entryFeeAmount) {
         return res.status(400).json({ message: `Insufficient coins. You need ${room.entryFeeAmount} coins to join this room.` });
       }
-      user.coinBalance -= room.entryFeeAmount;
+      user.coinBalance = currentCoins - room.entryFeeAmount;
       room.prizePool = (room.prizePool || 0) + room.entryFeeAmount; // Add to prize pool
       await user.save();
     }
@@ -127,6 +133,7 @@ export const joinRoom = async (req, res) => {
     room.members.push({ user: req.user._id, team: userTeam ? userTeam._id : null });
     await room.save();
 
+    console.log(`[joinRoom] User ${user._id} successfully joined room ${room._id}`);
     res.status(200).json(room);
   } catch (error) {
     console.error('Join Room Error:', error);
