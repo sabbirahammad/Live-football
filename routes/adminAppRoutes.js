@@ -72,7 +72,6 @@ router.post('/upload-app', (req, res) => {
   }
   });
 });
-});
 
 // ২. ওয়েবসাইট থেকে লেটেস্ট অ্যাপ এর তথ্য পাওয়া (GET)
 router.get('/latest-app/:platform', async (req, res) => {
