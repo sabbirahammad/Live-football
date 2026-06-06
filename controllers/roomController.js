@@ -12,8 +12,12 @@ export const createRoom = async (req, res) => {
   const { name, matchId, privacy, maxPlayers, challengeType, reward, entryFeeAmount, entryFeeCurrency } = req.body;
 
   try {
+    if (!matchId) return res.status(400).json({ message: 'Match ID is required' });
+
     let match = await Match.findOne({ fixtureId: Number(matchId) });
-    if (!match && matchId.length === 24) match = await Match.findById(matchId);
+    if (!match && typeof matchId === 'string' && matchId.length === 24) {
+      match = await Match.findById(matchId);
+    }
 
     if (!match && !isNaN(matchId)) {
       const apiKey = process.env.FOOTBALL_API_KEY;
@@ -94,8 +98,12 @@ export const createRoom = async (req, res) => {
 export const joinRoom = async (req, res) => {
   const { code } = req.body;
 
+  if (!code) {
+    return res.status(400).json({ message: 'Room code is required' });
+  }
+
   try {
-    const room = await Room.findOne({ code: code.toUpperCase() });
+    const room = await Room.findOne({ code: code.toString().toUpperCase() });
     if (!room) {
       return res.status(404).json({ message: 'Room not found with this code' });
     }
@@ -103,7 +111,7 @@ export const joinRoom = async (req, res) => {
     const user = await User.findById(req.user._id);
     if (!user) return res.status(404).json({ message: 'User not found' });
 
-    if (room.members.some(member => member.user.equals(user._id))) {
+    if (room.members.some(member => member.user && member.user.toString() === user._id.toString())) {
       return res.status(400).json({ message: 'You are already in this room' });
     }
 
@@ -112,7 +120,7 @@ export const joinRoom = async (req, res) => {
         return res.status(400).json({ message: `Insufficient coins. You need ${room.entryFeeAmount} coins to join this room.` });
       }
       user.coinBalance -= room.entryFeeAmount;
-      room.prizePool += room.entryFeeAmount; // Add to prize pool
+      room.prizePool = (room.prizePool || 0) + room.entryFeeAmount; // Add to prize pool
       await user.save();
     }
     const userTeam = await FantasyTeam.findOne({ user: req.user._id, match: room.match });
@@ -121,6 +129,7 @@ export const joinRoom = async (req, res) => {
 
     res.status(200).json(room);
   } catch (error) {
+    console.error('Join Room Error:', error);
     res.status(500).json({ message: 'Server error joining room', error: error.message });
   }
 };

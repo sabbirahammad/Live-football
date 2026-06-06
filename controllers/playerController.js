@@ -339,7 +339,7 @@ export const syncPlayersForMatch = async (req, res) => {
     const currentYear = new Date().getFullYear();
     const season = new Date().getMonth() >= 7 ? currentYear : currentYear - 1;
 
-    const [homeSquadData, awaySquadData, injuryData] = await Promise.all([
+    let [homeSquadData, awaySquadData, injuryData] = await Promise.all([
       fetchWithRotation(`players/squads?team=${homeTeamId}`),
       fetchWithRotation(`players/squads?team=${awayTeamId}`),
       fetchWithRotation(`injuries?fixture=${match.fixtureId}`)
