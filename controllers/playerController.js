@@ -1,6 +1,32 @@
 import Player from '../models/Player.js';
 import Match from '../models/Match.js';
 
+const SYNC_COOLDOWN_MS = Number(process.env.PLAYER_SYNC_COOLDOWN_MS || 60 * 60 * 1000);
+const syncCooldowns = new Map();
+
+const hasApiErrors = (data) => data?.errors && Object.keys(data.errors).length > 0;
+const getApiErrorMessage = (data) => Object.values(data?.errors || {})[0] || 'API-Sports request failed.';
+
+const getSyncCooldown = (fixtureId) => {
+  const entry = syncCooldowns.get(String(fixtureId));
+  if (!entry || entry.expiresAt <= Date.now()) {
+    syncCooldowns.delete(String(fixtureId));
+    return null;
+  }
+  return entry;
+};
+
+const setSyncCooldown = (fixtureId, reason) => {
+  if (!fixtureId) return;
+  syncCooldowns.set(String(fixtureId), { reason, expiresAt: Date.now() + SYNC_COOLDOWN_MS });
+};
+
+const sendCooldownResponse = (res, fixtureId, cooldown) =>
+  res.status(429).json({
+    message: `Player sync temporarily paused for fixture ${fixtureId}: ${cooldown.reason}`,
+    retryAfterMs: Math.max(0, cooldown.expiresAt - Date.now()),
+  });
+
 // একাধিক API কী হ্যান্ডেল করার জন্য হেল্পার
 const getApiKeys = () => {
   const keys = (process.env.FOOTBALL_API_KEY || '') + ',' + (process.env.FOOTBALL_API_KEYS || '');
@@ -88,10 +114,8 @@ export const getPlayersForMatch = async (req, res) => {
       console.log(`Auto-syncing Match ${matchId} to DB...`);
       const fixtureData = await fetchWithRotation(`fixtures?id=${matchId}`);
       
-      if (fixtureData.errors && Object.keys(fixtureData.errors).length > 0) {
-        if (fixtureData.errors.requests) {
-          return res.status(429).json({ message: `API-Sports Error: ${Object.values(fixtureData.errors)[0]}` });
-        }
+      if (hasApiErrors(fixtureData)) {
+        return res.status(429).json({ message: `API-Sports Error: ${getApiErrorMessage(fixtureData)}` });
       }
 
       if (fixtureData.response && fixtureData.response.length > 0) {
@@ -116,14 +140,19 @@ export const getPlayersForMatch = async (req, res) => {
 
     // Auto-sync players if empty
     if (match.players.length === 0 && match.fixtureId) {
+        const cooldown = getSyncCooldown(match.fixtureId);
+        if (cooldown) return sendCooldownResponse(res, match.fixtureId, cooldown);
+
         console.log(`Auto-syncing players for fixture ID: ${match.fixtureId}`);
         
         // যদি ম্যাচের টিম আইডি না থাকে, তবে এপিআই থেকে এনে নিবে
         if (!match.homeTeamApiId || !match.awayTeamApiId) {
           const fixtureData = await fetchWithRotation(`fixtures?id=${match.fixtureId}`);
 
-          if (fixtureData.errors && Object.keys(fixtureData.errors).length > 0) {
-            return res.status(429).json({ message: `API-Sports Error: ${Object.values(fixtureData.errors)[0]}` });
+          if (hasApiErrors(fixtureData)) {
+            const reason = getApiErrorMessage(fixtureData);
+            setSyncCooldown(match.fixtureId, reason);
+            return res.status(429).json({ message: `API-Sports Error: ${reason}` });
           }
 
           if (fixtureData.response && fixtureData.response.length > 0) {
@@ -146,6 +175,13 @@ export const getPlayersForMatch = async (req, res) => {
             fetchWithRotation(`players/squads?team=${awayTeamId}`),
             fetchWithRotation(`injuries?fixture=${match.fixtureId}`)
           ]);
+
+          const syncError = [homeSquadRes, awaySquadRes, injuryRes].find(hasApiErrors);
+          if (syncError) {
+            const reason = getApiErrorMessage(syncError);
+            setSyncCooldown(match.fixtureId, reason);
+            return res.status(429).json({ message: `API-Sports Error: ${reason}` });
+          }
           
           let homeSquadData = homeSquadRes;
           let awaySquadData = awaySquadRes;
@@ -154,20 +190,40 @@ export const getPlayersForMatch = async (req, res) => {
           // Fallback 1: ফুটবল সিজন অনুযায়ী প্লেয়ারদের খোঁজা
           if (!homeSquadData.response || homeSquadData.response.length === 0) {
             const fb = await fetchWithRotation(`players?team=${homeTeamId}&season=${footballSeason}`);
+            if (hasApiErrors(fb)) {
+              const reason = getApiErrorMessage(fb);
+              setSyncCooldown(match.fixtureId, reason);
+              return res.status(429).json({ message: `API-Sports Error: ${reason}` });
+            }
             if (fb.response?.length > 0) homeSquadData = { response: [{ team: fb.response[0].statistics[0].team, players: fb.response.map(x => x.player) }] };
           }
           // Fallback 2: ক্যালেন্ডার ইয়ার অনুযায়ী খোঁজা (ইন্টারন্যাশনাল ম্যাচের জন্য কার্যকরী)
           if (!homeSquadData.response || homeSquadData.response.length === 0) {
             const fb = await fetchWithRotation(`players?team=${homeTeamId}&season=${calendarYear}`);
+            if (hasApiErrors(fb)) {
+              const reason = getApiErrorMessage(fb);
+              setSyncCooldown(match.fixtureId, reason);
+              return res.status(429).json({ message: `API-Sports Error: ${reason}` });
+            }
             if (fb.response?.length > 0) homeSquadData = { response: [{ team: fb.response[0].statistics[0].team, players: fb.response.map(x => x.player) }] };
           }
 
           if (!awaySquadData.response || awaySquadData.response.length === 0) {
             const fb = await fetchWithRotation(`players?team=${awayTeamId}&season=${footballSeason}`);
+            if (hasApiErrors(fb)) {
+              const reason = getApiErrorMessage(fb);
+              setSyncCooldown(match.fixtureId, reason);
+              return res.status(429).json({ message: `API-Sports Error: ${reason}` });
+            }
             if (fb.response?.length > 0) awaySquadData = { response: [{ team: fb.response[0].statistics[0].team, players: fb.response.map(x => x.player) }] };
           }
           if (!awaySquadData.response || awaySquadData.response.length === 0) {
             const fb = await fetchWithRotation(`players?team=${awayTeamId}&season=${calendarYear}`);
+            if (hasApiErrors(fb)) {
+              const reason = getApiErrorMessage(fb);
+              setSyncCooldown(match.fixtureId, reason);
+              return res.status(429).json({ message: `API-Sports Error: ${reason}` });
+            }
             if (fb.response?.length > 0) awaySquadData = { response: [{ team: fb.response[0].statistics[0].team, players: fb.response.map(x => x.player) }] };
           }
 

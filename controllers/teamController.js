@@ -223,6 +223,57 @@ export const getMyTeam = async (req, res) => {
   }
 };
 
+// @desc    Get saved-team availability for multiple matches
+// @route   GET /api/teams/my-teams?matchIds=1,2,3
+// @access  Private
+export const getMyTeamsMap = async (req, res) => {
+  try {
+    const matchIds = String(req.query.matchIds || '')
+      .split(',')
+      .map(id => id.trim())
+      .filter(Boolean);
+
+    if (matchIds.length === 0) {
+      return res.status(200).json({});
+    }
+
+    const fixtureIds = matchIds
+      .filter(id => /^\d+$/.test(id))
+      .map(id => Number(id));
+    const objectIds = matchIds.filter(id => mongoose.isValidObjectId(id));
+
+    const matches = await Match.find({
+      $or: [
+        fixtureIds.length ? { fixtureId: { $in: fixtureIds } } : null,
+        objectIds.length ? { _id: { $in: objectIds } } : null,
+      ].filter(Boolean),
+    }).select('_id fixtureId');
+
+    const teams = await FantasyTeam.find({
+      user: req.user._id,
+      match: { $in: matches.map(match => match._id) },
+    }).select('match');
+
+    const savedMatchIds = new Set(teams.map(team => team.match.toString()));
+    const result = {};
+    for (const inputId of matchIds) result[inputId] = false;
+
+    for (const match of matches) {
+      const hasTeam = savedMatchIds.has(match._id.toString());
+      result[match._id.toString()] = hasTeam;
+      if (match.fixtureId) result[String(match.fixtureId)] = hasTeam;
+    }
+
+    res.status(200).json(result);
+  } catch (error) {
+    console.error('getMyTeamsMap error:', {
+      message: error.message,
+      userId: req.user?._id?.toString?.(),
+    });
+    res.status(500).json({ message: 'Server error fetching saved teams map', error: error.message });
+  }
+};
+
 // @desc    Get a leaderboard-visible user's fantasy team for a specific match
 // @route   GET /api/teams/user/:userId/match/:matchId
 // @access  Private
