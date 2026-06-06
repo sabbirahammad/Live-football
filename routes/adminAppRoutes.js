@@ -44,6 +44,7 @@ router.post('/upload-app', upload.single('appFile'), async (req, res) => {
 
     await newUpdate.save();
 
+    console.error('Error during app upload:', error); // সার্ভার-সাইড লগিংয়ের জন্য
     // Socket.io এর মাধ্যমে সব ইউজারকে নোটিফাই করা
     const io = req.app.get('io');
     if (io) {
