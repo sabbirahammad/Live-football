@@ -2,6 +2,7 @@ import express from 'express';
 import http from 'http';
 import { Server } from 'socket.io';
 import dotenv from 'dotenv';
+import path from 'path';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
@@ -20,6 +21,7 @@ import adminUserRoutes from './routes/adminUserRoutes.js';
 import adminStatsRoutes from './routes/adminStatsRoutes.js';
 import adminPaymentRoutes from './routes/adminPaymentRoutes.js';
 import shopRoutes from './routes/shopRoutes.js';
+import adminAppRoutes from './routes/adminAppRoutes.js';
 import appConfigRoutes from './routes/appConfigRoutes.js';
 
 import { fetchAndSaveLiveMatches } from './services/liveMatchService.js';
@@ -70,8 +72,12 @@ app.use('/api/admin/streams', adminStreamRoutes);
 app.use('/api/admin/users', adminUserRoutes);
 app.use('/api/admin/stats', adminStatsRoutes);
 app.use('/api/admin/payments', adminPaymentRoutes);
+app.use('/api/admin', adminAppRoutes); // এডমিন আপলোড রাউট
 app.use('/api/shop', shopRoutes);
 app.use('/api/app-config', appConfigRoutes);
+
+// স্ট্যাটিক ফাইল এক্সেস করার জন্য (অ্যাপ ডাউনলোড লিংক কাজ করবে)
+app.use('/uploads', express.static('uploads'));
 
 // বেসিক টেস্টিং রাউট
 app.get('/', (req, res) => {
