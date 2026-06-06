@@ -23,12 +23,22 @@ const storage = multer.diskStorage({
 
 const upload = multer({ 
   storage,
-  limits: { fileSize: 100 * 1024 * 1024 } // সর্বোচ্চ ১০০ এমবি
-});
+  limits: { fileSize: 500 * 1024 * 1024 } // সীমা বাড়িয়ে ৫০০ এমবি করা হলো
+}).single('appFile');
 
-// ১. এডমিন থেকে অ্যাপ আপলোড (POST)
-router.post('/upload-app', upload.single('appFile'), async (req, res) => {
-  try {
+// ১. এডমিন থেকে অ্যাপ আপলোড (POST) - এরর হ্যান্ডলিং সহ
+router.post('/upload-app', (req, res) => {
+  upload(req, res, async (err) => {
+    if (err instanceof multer.MulterError) {
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(400).json({ message: 'File is too large. Max limit is 500MB.' });
+      }
+      return res.status(400).json({ message: err.message });
+    } else if (err) {
+      return res.status(500).json({ message: err.message });
+    }
+
+    try {
     const { version, releaseNotes, platform } = req.body;
     if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
 
@@ -60,6 +70,8 @@ router.post('/upload-app', upload.single('appFile'), async (req, res) => {
     console.error('Error during app upload:', error);
     res.status(500).json({ message: error.message });
   }
+  });
+});
 });
 
 // ২. ওয়েবসাইট থেকে লেটেস্ট অ্যাপ এর তথ্য পাওয়া (GET)
