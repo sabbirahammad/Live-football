@@ -7,7 +7,6 @@ import {
   getLiveStreamsForMatch,
   getStreamScraperHealth,
 } from '../services/streamScraperService.js';
-import fetch from 'node-fetch'; // Add this for checking global links
 
 const resolveMatchFromParam = async (matchId) => {
   const rawMatchId = String(matchId || '').trim();
