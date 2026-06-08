@@ -186,7 +186,7 @@ const validateStreamUrl = async (stream) => {
     const url = String(stream?.url || '');
     const isPlaylist = url.toLowerCase().includes('.m3u8');
     const response = await fetch(url, {
-      method: isPlaylist ? 'GET' : 'HEAD',
+      method: 'GET',
       redirect: 'follow',
       signal: controller.signal,
       headers: isPlaylist ? { Range: 'bytes=0-512' } : undefined,

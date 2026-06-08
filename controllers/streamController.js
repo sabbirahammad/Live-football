@@ -28,7 +28,7 @@ const checkStreamAlive = async (url) => {
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 2000);
-    const res = await fetch(url, { method: 'HEAD', signal: controller.signal });
+    const res = await fetch(url, { method: 'GET', headers: { Range: 'bytes=0-0' }, signal: controller.signal });
     clearTimeout(timeoutId);
     return res.ok;
   } catch (err) {
@@ -61,16 +61,15 @@ export const getMatchStreams = async (req, res) => {
       });
     }
 
-    const fixtureKey = String(match.fixtureId || match._id);
-    
     // Fetch AppConfig for Global Links and Fallback Auto Link
     const config = await AppConfig.findOne();
     const globalStreamLinksStr = config?.globalStreamLinks || '';
     const fallbackAutoLink = config?.fallbackAutoLink || '';
     
     // ১. & ২. অ্যাডমিন প্যানেল থেকে দেওয়া অ্যাকটিভ লিংকগুলো খুঁজে বের করা (1st priority = isBest, 2nd = others)
+    // fixtureId এবং MongoDB _id উভয় দিয়েই সার্চ করা হচ্ছে যাতে কোনো লিংক মিস না হয়
     const manualStreams = await ManualStream.find({ 
-      matchId: fixtureKey, 
+      matchId: { $in: [String(match._id), String(match.fixtureId || '')] }, 
       isActive: true 
     }).sort({ isBest: -1, createdAt: -1 });
 
@@ -87,10 +86,12 @@ export const getMatchStreams = async (req, res) => {
     const globalStreams = [];
     if (globalStreamLinksStr.trim() !== '') {
       const links = globalStreamLinksStr.split(',').map(l => l.trim()).filter(l => l);
-      for (let i = 0; i < links.length; i++) {
-        const link = links[i];
-        const isAlive = await checkStreamAlive(link);
-        if (isAlive) {
+      
+      // পারফরম্যান্স বাড়ানোর জন্য সবগুলো লিংক একসাথে চেক করা হচ্ছে
+      const aliveChecks = await Promise.all(links.map(link => checkStreamAlive(link)));
+      
+      links.forEach((link, i) => {
+        if (aliveChecks[i]) {
           globalStreams.push({
             title: `Global Server ${i + 1} (Auto Checked)`,
             url: link,
@@ -99,7 +100,7 @@ export const getMatchStreams = async (req, res) => {
             isAlive: true
           });
         }
-      }
+      });
     }
 
     const health = await getStreamScraperHealth();
@@ -142,6 +143,8 @@ export const getMatchStreams = async (req, res) => {
       result.available = true;
       result.state = 'ready';
     } else if (!health.ok && !hasAnyAdminOrGlobalStream) {
+       const hasAnyAdminOrGlobalStream = formattedManualStreams.length > 0 || globalStreams.length > 0;
+
        return res.status(503).json({
         available: false,
         message: 'Live stream scraper is not ready yet and no admin/global streams found.',
@@ -173,14 +176,12 @@ export const refreshMatchStreams = async (req, res) => {
       });
     }
 
-    const fixtureKey = String(match.fixtureId || match._id);
-
     const config = await AppConfig.findOne();
     const globalStreamLinksStr = config?.globalStreamLinks || '';
     const fallbackAutoLink = config?.fallbackAutoLink || '';
 
     const manualStreams = await ManualStream.find({ 
-      matchId: fixtureKey, 
+      matchId: { $in: [String(match._id), String(match.fixtureId || '')] }, 
       isActive: true 
     }).sort({ isBest: -1, createdAt: -1 });
     
@@ -192,10 +193,11 @@ export const refreshMatchStreams = async (req, res) => {
     const globalStreams = [];
     if (globalStreamLinksStr.trim() !== '') {
       const links = globalStreamLinksStr.split(',').map(l => l.trim()).filter(l => l);
-      for (let i = 0; i < links.length; i++) {
-        const link = links[i];
-        const isAlive = await checkStreamAlive(link);
-        if (isAlive) {
+
+      const aliveChecks = await Promise.all(links.map(link => checkStreamAlive(link)));
+
+      links.forEach((link, i) => {
+        if (aliveChecks[i]) {
           globalStreams.push({
             title: `Global Server ${i + 1} (Auto Checked)`,
             url: link,
@@ -204,7 +206,7 @@ export const refreshMatchStreams = async (req, res) => {
             isAlive: true
           });
         }
-      }
+      });
     }
 
     const health = await getStreamScraperHealth();
@@ -221,11 +223,8 @@ export const refreshMatchStreams = async (req, res) => {
       state: 'empty',
     };
 
-    const hasAnyAdminOrGlobalStream = formattedManualStreams.length > 0 || globalStreams.length > 0;
-
-    if (!health.ok && !hasAnyAdminOrGlobalStream) {
-      // do nothing
-    } else if (health.ok && !hasAnyAdminOrGlobalStream) {
+    // লজিক ফিক্স: স্ক্র্যাপার হেলদি থাকলে সবসময় রিফ্রেশ করবে
+    if (health.ok) {
       await clearLiveStreamCache(match.fixtureId || match._id);
       result = await getLiveStreamsForMatch(match, { forceRefresh: true });
     }
@@ -249,6 +248,8 @@ export const refreshMatchStreams = async (req, res) => {
       result.available = true;
       result.state = 'ready';
     } else if (!health.ok && !hasAnyAdminOrGlobalStream) {
+      const hasAnyAdminOrGlobalStream = formattedManualStreams.length > 0 || globalStreams.length > 0;
+
       return res.status(503).json({
         available: false,
         message: 'Live stream scraper is not ready yet and no admin streams found.',
