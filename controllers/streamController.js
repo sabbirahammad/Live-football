@@ -116,11 +116,8 @@ export const getMatchStreams = async (req, res) => {
       state: 'empty',
     };
 
-    const hasAnyAdminOrGlobalStream = formattedManualStreams.length > 0 || globalStreams.length > 0;
-
-    if (!health.ok && !hasAnyAdminOrGlobalStream) {
-      // যদি স্ক্র্যাপার অফ থাকে এবং অন্য কোনো লিংক না থাকে
-    } else if (health.ok && !hasAnyAdminOrGlobalStream) {
+    // Scraper healthy থাকলে সবসময় কল করা উচিত যাতে অ্যাডমিন লিঙ্কের পাশাপাশি অটো লিঙ্কও পাওয়া যায়
+    if (health.ok) {
       result = await getLiveStreamsForMatch(match);
     }
     
