@@ -189,7 +189,7 @@ const validateStreamUrl = async (stream) => {
       method: 'GET',
       redirect: 'follow',
       signal: controller.signal,
-      headers: isPlaylist ? { Range: 'bytes=0-512' } : undefined,
+      headers: { 'User-Agent': 'VLC/3.0.18 LibVLC/3.0.18', ...(isPlaylist ? { Range: 'bytes=0-512' } : {}) },
     });
 
     let looksPlayable = response.ok;

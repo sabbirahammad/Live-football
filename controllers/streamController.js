@@ -28,7 +28,7 @@ const checkStreamAlive = async (url) => {
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 2000);
-    const res = await fetch(url, { method: 'GET', headers: { Range: 'bytes=0-0' }, signal: controller.signal });
+    const res = await fetch(url, { method: 'GET', headers: { Range: 'bytes=0-0', 'User-Agent': 'VLC/3.0.18 LibVLC/3.0.18' }, signal: controller.signal });
     clearTimeout(timeoutId);
     return res.ok;
   } catch (err) {
