@@ -122,16 +122,15 @@ export const getMatchStreams = async (req, res) => {
       result = await getLiveStreamsForMatch(match);
     }
     
-    // ৪. Auto Link (Fallback) - যদি কোনো লিংক না থাকে (বা সব কাজ শেষ হওয়ার পর Fallback হিসেবে)
     const finalStreams = [...formattedManualStreams, ...globalStreams, ...(result.streams || [])];
-    
-    // যদি একদম কোনো লিংক না থাকে, আর Fallback Auto Link দেওয়া থাকে
+    const hasAnyStream = finalStreams.length > 0;
+
     if (finalStreams.length === 0 && fallbackAutoLink.trim() !== '') {
       finalStreams.push({
         title: 'Auto Link (Fallback Server)',
         url: fallbackAutoLink.trim(),
         source: 'fallback',
-        rankScore: 100, // 4th priority
+        rankScore: 100,
         isAlive: true
       });
     }
@@ -142,10 +141,8 @@ export const getMatchStreams = async (req, res) => {
     if (result.streamCount > 0) {
       result.available = true;
       result.state = 'ready';
-    } else if (!health.ok && !hasAnyAdminOrGlobalStream) {
-       const hasAnyAdminOrGlobalStream = formattedManualStreams.length > 0 || globalStreams.length > 0;
-
-       return res.status(503).json({
+    } else if (!health.ok) {
+      return res.status(503).json({
         available: false,
         message: 'Live stream scraper is not ready yet and no admin/global streams found.',
         health,
@@ -247,9 +244,8 @@ export const refreshMatchStreams = async (req, res) => {
     if (result.streamCount > 0) {
       result.available = true;
       result.state = 'ready';
-    } else if (!health.ok && !hasAnyAdminOrGlobalStream) {
+    } else if (!health.ok) {
       const hasAnyAdminOrGlobalStream = formattedManualStreams.length > 0 || globalStreams.length > 0;
-
       return res.status(503).json({
         available: false,
         message: 'Live stream scraper is not ready yet and no admin streams found.',
