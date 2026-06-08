@@ -351,9 +351,26 @@ export const syncMatchesFromApi = async (io, options = {}) => {
 
 export const fetchAndSaveLiveMatches = async (io) => {
   try {
+    const now = new Date();
+    const fourHoursAgo = new Date(now.getTime() - 4 * 60 * 60 * 1000);
+    const tenMinsFromNow = new Date(now.getTime() + 10 * 60 * 1000);
+
+    // Check if there's any match in the DB that could be currently live
+    const potentialLiveMatches = await Match.find({
+      $or: [
+        { status: 'Live' },
+        { matchTime: { $gte: fourHoursAgo, $lte: tenMinsFromNow }, status: { $ne: 'Finished' } }
+      ]
+    });
+
+    if (potentialLiveMatches.length === 0) {
+      console.log('No matches are scheduled to be live right now. Skipping API call to save limit.');
+      return;
+    }
+
     console.log('Fetching live matches from api-sports...');
     const data = await fetchWithRotation('fixtures?live=all');
-    const matches = data.response;
+    const matches = data.response || [];
 
     if (matches && matches.length > 0) {
       for (const match of matches) {
@@ -385,12 +402,5 @@ export const fetchAndSaveLiveMatches = async (io) => {
     }
   } catch (error) {
     console.error('Error fetching live-only endpoint:', error.response?.data || error.message);
-  }
-
-  try {
-    const syncResult = await syncMatchesFromApi(io);
-    console.log(`Match sync result: ${syncResult.synced} synced, ${syncResult.finalized} finalized.`);
-  } catch (error) {
-    console.error('Error syncing dated fixtures:', error.response?.data || error.message);
   }
 };

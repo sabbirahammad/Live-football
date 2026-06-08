@@ -192,7 +192,18 @@ export const registerUser = async (req, res) => {
 
   try {
     const safeName = String(name || '').trim();
-    const safePhone = String(phone || '').replace(/\D/g, '').slice(0, 11);
+    let safePhone = String(phone || '').replace(/[^\d+]/g, '');
+
+    if (safePhone.startsWith('+880')) {
+      safePhone = '0' + safePhone.slice(4);
+    } else if (safePhone.startsWith('+88')) {
+      safePhone = '0' + safePhone.slice(3);
+    } else if (safePhone.length === 13 && safePhone.startsWith('880')) {
+      safePhone = '0' + safePhone.slice(3);
+    } else if (safePhone.length === 10 && safePhone.startsWith('1')) {
+      safePhone = '0' + safePhone;
+    }
+
     const safePassword = String(password || '');
     const safeReferral = String(referredBy || '').trim().toUpperCase();
 
@@ -200,12 +211,8 @@ export const registerUser = async (req, res) => {
       return res.status(400).json({ message: 'Please add all fields' });
     }
 
-    if (!/^01\d{9}$/.test(safePhone)) {
-      return res.status(400).json({ message: 'Enter a valid Bangladesh phone number' });
-    }
-
-    if (safePassword.length < 6) {
-      return res.status(400).json({ message: 'Password must be at least 6 characters' });
+    if (safePhone.length < 7) {
+      return res.status(400).json({ message: 'Enter a valid phone number' });
     }
 
     const userExists = await User.findOne({ phone: safePhone });
@@ -275,7 +282,19 @@ export const loginUser = async (req, res) => {
   const { phone, password } = req.body;
 
   try {
-    const user = await User.findOne({ phone });
+    let safePhone = String(phone || '').replace(/[^\d+]/g, '');
+
+    if (safePhone.startsWith('+880')) {
+      safePhone = '0' + safePhone.slice(4);
+    } else if (safePhone.startsWith('+88')) {
+      safePhone = '0' + safePhone.slice(3);
+    } else if (safePhone.length === 13 && safePhone.startsWith('880')) {
+      safePhone = '0' + safePhone.slice(3);
+    } else if (safePhone.length === 10 && safePhone.startsWith('1')) {
+      safePhone = '0' + safePhone;
+    }
+
+    const user = await User.findOne({ phone: safePhone });
 
     if (!user || !(await bcrypt.compare(password, user.password))) {
       return res.status(400).json({ message: 'Invalid credentials' });

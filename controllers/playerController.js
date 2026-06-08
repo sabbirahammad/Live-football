@@ -95,6 +95,9 @@ export const getPlayers = async (req, res) => {
   }
 };
 
+// Prevent concurrent identical requests
+const syncLocks = new Set();
+
 // @desc    Get all players for a specific match from DB
 // @route   GET /api/players/:matchId
 // @access  Public
@@ -113,7 +116,7 @@ export const getPlayersForMatch = async (req, res) => {
     if (!match && !isNaN(matchId)) {
       console.log(`Auto-syncing Match ${matchId} to DB...`);
       const fixtureData = await fetchWithRotation(`fixtures?id=${matchId}`);
-      
+
       if (hasApiErrors(fixtureData)) {
         return res.status(429).json({ message: `API-Sports Error: ${getApiErrorMessage(fixtureData)}` });
       }
@@ -139,153 +142,172 @@ export const getPlayersForMatch = async (req, res) => {
     }
 
     // Auto-sync players if empty
-    if (match.players.length === 0 && match.fixtureId) {
+    if (match.players && match.players.length === 0 && match.fixtureId) {
         const cooldown = getSyncCooldown(match.fixtureId);
         if (cooldown) return sendCooldownResponse(res, match.fixtureId, cooldown);
 
-        console.log(`Auto-syncing players for fixture ID: ${match.fixtureId}`);
-        
-        // যদি ম্যাচের টিম আইডি না থাকে, তবে এপিআই থেকে এনে নিবে
-        if (!match.homeTeamApiId || !match.awayTeamApiId) {
-          const fixtureData = await fetchWithRotation(`fixtures?id=${match.fixtureId}`);
-
-          if (hasApiErrors(fixtureData)) {
-            const reason = getApiErrorMessage(fixtureData);
-            setSyncCooldown(match.fixtureId, reason);
-            return res.status(429).json({ message: `API-Sports Error: ${reason}` });
+        // If another request is currently syncing this match, wait for it instead of hitting API again
+        if (syncLocks.has(match.fixtureId)) {
+          console.log(`Match ${match.fixtureId} is already syncing players. Waiting for completion...`);
+          // Simple poll to wait for the other request to finish saving to DB
+          for (let i = 0; i < 15; i++) { 
+             await new Promise(resolve => setTimeout(resolve, 1000));
+             const checkMatch = await Match.findOne({ fixtureId: match.fixtureId }).populate('players');
+             if (checkMatch && checkMatch.players && checkMatch.players.length > 0) {
+               return res.status(200).json(checkMatch.players);
+             }
           }
-
-          if (fixtureData.response && fixtureData.response.length > 0) {
-            match.homeTeamApiId = fixtureData.response[0].teams.home.id;
-            match.awayTeamApiId = fixtureData.response[0].teams.away.id;
-            await match.save();
-          }
+          return res.status(503).json({ message: 'Sync in progress, please try again shortly.' });
         }
 
-        const homeTeamId = match.homeTeamApiId;
-        const awayTeamId = match.awayTeamApiId;
+        syncLocks.add(match.fixtureId);
+        try {
+          console.log(`Auto-syncing players for fixture ID: ${match.fixtureId}`);
 
-        if (homeTeamId && awayTeamId) {
-          const calendarYear = new Date().getFullYear();
-          const footballSeason = new Date().getMonth() >= 7 ? calendarYear : calendarYear - 1;
+          // যদি ম্যাচের টিম আইডি না থাকে, তবে এপিআই থেকে এনে নিবে
+          if (!match.homeTeamApiId || !match.awayTeamApiId) {
+            const fixtureData = await fetchWithRotation(`fixtures?id=${match.fixtureId}`);
 
-          // ২. Home, Away টিমের স্কোয়াড এবং ইনজুরি লিস্ট আনা (রোটেশনসহ)
-          const [homeSquadRes, awaySquadRes, injuryRes] = await Promise.all([
-            fetchWithRotation(`players/squads?team=${homeTeamId}`),
-            fetchWithRotation(`players/squads?team=${awayTeamId}`),
-            fetchWithRotation(`injuries?fixture=${match.fixtureId}`)
-          ]);
-
-          const syncError = [homeSquadRes, awaySquadRes, injuryRes].find(hasApiErrors);
-          if (syncError) {
-            const reason = getApiErrorMessage(syncError);
-            setSyncCooldown(match.fixtureId, reason);
-            return res.status(429).json({ message: `API-Sports Error: ${reason}` });
-          }
-          
-          let homeSquadData = homeSquadRes;
-          let awaySquadData = awaySquadRes;
-          const injuryData = injuryRes;
-
-          // Fallback 1: ফুটবল সিজন অনুযায়ী প্লেয়ারদের খোঁজা
-          if (!homeSquadData.response || homeSquadData.response.length === 0) {
-            const fb = await fetchWithRotation(`players?team=${homeTeamId}&season=${footballSeason}`);
-            if (hasApiErrors(fb)) {
-              const reason = getApiErrorMessage(fb);
+            if (hasApiErrors(fixtureData)) {
+              const reason = getApiErrorMessage(fixtureData);
               setSyncCooldown(match.fixtureId, reason);
               return res.status(429).json({ message: `API-Sports Error: ${reason}` });
             }
-            if (fb.response?.length > 0) homeSquadData = { response: [{ team: fb.response[0].statistics[0].team, players: fb.response.map(x => x.player) }] };
+
+            if (fixtureData.response && fixtureData.response.length > 0) {
+              match.homeTeamApiId = fixtureData.response[0].teams.home.id;
+              match.awayTeamApiId = fixtureData.response[0].teams.away.id;
+              await match.save();
+            }
           }
-          // Fallback 2: ক্যালেন্ডার ইয়ার অনুযায়ী খোঁজা (ইন্টারন্যাশনাল ম্যাচের জন্য কার্যকরী)
-          if (!homeSquadData.response || homeSquadData.response.length === 0) {
-            const fb = await fetchWithRotation(`players?team=${homeTeamId}&season=${calendarYear}`);
-            if (hasApiErrors(fb)) {
-              const reason = getApiErrorMessage(fb);
+
+          const homeTeamId = match.homeTeamApiId;
+          const awayTeamId = match.awayTeamApiId;
+
+          if (homeTeamId && awayTeamId) {
+            const calendarYear = new Date().getFullYear();
+            const footballSeason = new Date().getMonth() >= 7 ? calendarYear : calendarYear - 1;
+
+            // ২. Home, Away টিমের স্কোয়াড এবং ইনজুরি লিস্ট আনা (রোটেশনসহ)
+            const [homeSquadRes, awaySquadRes, injuryRes] = await Promise.all([
+              fetchWithRotation(`players/squads?team=${homeTeamId}`),
+              fetchWithRotation(`players/squads?team=${awayTeamId}`),
+              fetchWithRotation(`injuries?fixture=${match.fixtureId}`)
+            ]);
+
+            const syncError = [homeSquadRes, awaySquadRes, injuryRes].find(hasApiErrors);
+            if (syncError) {
+              const reason = getApiErrorMessage(syncError);
               setSyncCooldown(match.fixtureId, reason);
               return res.status(429).json({ message: `API-Sports Error: ${reason}` });
             }
-            if (fb.response?.length > 0) homeSquadData = { response: [{ team: fb.response[0].statistics[0].team, players: fb.response.map(x => x.player) }] };
-          }
 
-          if (!awaySquadData.response || awaySquadData.response.length === 0) {
-            const fb = await fetchWithRotation(`players?team=${awayTeamId}&season=${footballSeason}`);
-            if (hasApiErrors(fb)) {
-              const reason = getApiErrorMessage(fb);
-              setSyncCooldown(match.fixtureId, reason);
-              return res.status(429).json({ message: `API-Sports Error: ${reason}` });
+            let homeSquadData = homeSquadRes;
+            let awaySquadData = awaySquadRes;
+            const injuryData = injuryRes;
+
+            // Fallback 1: ফুটবল সিজন অনুযায়ী প্লেয়ারদের খোঁজা
+            if (!homeSquadData.response || homeSquadData.response.length === 0) {
+              const fb = await fetchWithRotation(`players?team=${homeTeamId}&season=${footballSeason}`);
+              if (hasApiErrors(fb)) {
+                const reason = getApiErrorMessage(fb);
+                setSyncCooldown(match.fixtureId, reason);
+                return res.status(429).json({ message: `API-Sports Error: ${reason}` });
+              }
+              if (fb.response?.length > 0) homeSquadData = { response: [{ team: fb.response[0].statistics[0].team, players: fb.response.map(x => x.player) }] };
             }
-            if (fb.response?.length > 0) awaySquadData = { response: [{ team: fb.response[0].statistics[0].team, players: fb.response.map(x => x.player) }] };
-          }
-          if (!awaySquadData.response || awaySquadData.response.length === 0) {
-            const fb = await fetchWithRotation(`players?team=${awayTeamId}&season=${calendarYear}`);
-            if (hasApiErrors(fb)) {
-              const reason = getApiErrorMessage(fb);
-              setSyncCooldown(match.fixtureId, reason);
-              return res.status(429).json({ message: `API-Sports Error: ${reason}` });
+            // Fallback 2: ক্যালেন্ডার ইয়ার অনুযায়ী খোঁজা (ইন্টারন্যাশনাল ম্যাচের জন্য কার্যকরী)
+            if (!homeSquadData.response || homeSquadData.response.length === 0) {
+              const fb = await fetchWithRotation(`players?team=${homeTeamId}&season=${calendarYear}`);
+              if (hasApiErrors(fb)) {
+                const reason = getApiErrorMessage(fb);
+                setSyncCooldown(match.fixtureId, reason);
+                return res.status(429).json({ message: `API-Sports Error: ${reason}` });
+              }
+              if (fb.response?.length > 0) homeSquadData = { response: [{ team: fb.response[0].statistics[0].team, players: fb.response.map(x => x.player) }] };
             }
-            if (fb.response?.length > 0) awaySquadData = { response: [{ team: fb.response[0].statistics[0].team, players: fb.response.map(x => x.player) }] };
-          }
 
-          const injuredPlayerIds = new Set();
-          if (injuryData.response) {
-            injuryData.response.forEach(inj => {
-              if (inj.player && inj.player.id) injuredPlayerIds.add(inj.player.id);
-            });
-          }
+            if (!awaySquadData.response || awaySquadData.response.length === 0) {
+              const fb = await fetchWithRotation(`players?team=${awayTeamId}&season=${footballSeason}`);
+              if (hasApiErrors(fb)) {
+                const reason = getApiErrorMessage(fb);
+                setSyncCooldown(match.fixtureId, reason);
+                return res.status(429).json({ message: `API-Sports Error: ${reason}` });
+              }
+              if (fb.response?.length > 0) awaySquadData = { response: [{ team: fb.response[0].statistics[0].team, players: fb.response.map(x => x.player) }] };
+            }
+            if (!awaySquadData.response || awaySquadData.response.length === 0) {
+              const fb = await fetchWithRotation(`players?team=${awayTeamId}&season=${calendarYear}`);
+              if (hasApiErrors(fb)) {
+                const reason = getApiErrorMessage(fb);
+                setSyncCooldown(match.fixtureId, reason);
+                return res.status(429).json({ message: `API-Sports Error: ${reason}` });
+              }
+              if (fb.response?.length > 0) awaySquadData = { response: [{ team: fb.response[0].statistics[0].team, players: fb.response.map(x => x.player) }] };
+            }
 
-          const squads = [];
-          if (homeSquadData.response && homeSquadData.response.length > 0) squads.push(homeSquadData.response[0]);
-          if (awaySquadData.response && awaySquadData.response.length > 0) squads.push(awaySquadData.response[0]);
-
-          if (squads.length > 0) {
-            const positionMap = { 
-              'Goalkeeper': 'GK', 'Defender': 'DEF', 'Midfielder': 'MID', 'Attacker': 'FWD',
-              'G': 'GK', 'D': 'DEF', 'M': 'MID', 'F': 'FWD' 
-            };
-          const bulkOps = [];
-          const playerApiIds = [];
-
-            for (const teamData of squads) {
-              for (const p of teamData.players) {
-                playerApiIds.push(p.id);
-                const mappedPos = positionMap[p.position] || positionMap[p.pos] || 'MID';
-              bulkOps.push({
-                updateOne: {
-                  filter: { apiId: p.id },
-                  update: {
-                    $set: {
-                      apiId: p.id,
-                      name: p.name,
-                        pos: mappedPos,
-                        price: calculatePlayerPrice(p.id, mappedPos),
-                        teamApiId: teamData.team.id,
-                        team: teamData.team.name,
-                        teamLogo: teamData.team.logo || '',
-                        isInjured: injuredPlayerIds.has(p.id),
-                      img: p.photo,
-                    }
-                  },
-                  upsert: true
-                }
+            const injuredPlayerIds = new Set();
+            if (injuryData.response) {
+              injuryData.response.forEach(inj => {
+                if (inj.player && inj.player.id) injuredPlayerIds.add(inj.player.id);
               });
             }
+
+            const squads = [];
+            if (homeSquadData.response && homeSquadData.response.length > 0) squads.push(homeSquadData.response[0]);
+            if (awaySquadData.response && awaySquadData.response.length > 0) squads.push(awaySquadData.response[0]);
+
+            if (squads.length > 0) {
+              const positionMap = { 
+                'Goalkeeper': 'GK', 'Defender': 'DEF', 'Midfielder': 'MID', 'Attacker': 'FWD',
+                'G': 'GK', 'D': 'DEF', 'M': 'MID', 'F': 'FWD' 
+              };
+            const bulkOps = [];
+            const playerApiIds = [];
+
+              for (const teamData of squads) {
+                for (const p of teamData.players) {
+                  playerApiIds.push(p.id);
+                  const mappedPos = positionMap[p.position] || positionMap[p.pos] || 'MID';
+                bulkOps.push({
+                  updateOne: {
+                    filter: { apiId: p.id },
+                    update: {
+                      $set: {
+                        apiId: p.id,
+                        name: p.name,
+                          pos: mappedPos,
+                          price: calculatePlayerPrice(p.id, mappedPos),
+                          teamApiId: teamData.team.id,
+                          team: teamData.team.name,
+                          teamLogo: teamData.team.logo || '',
+                          isInjured: injuredPlayerIds.has(p.id),
+                        img: p.photo,
+                      }
+                    },
+                    upsert: true
+                  }
+                });
+              }
+            }
+
+            if (bulkOps.length > 0) {
+              await Player.bulkWrite(bulkOps);
+              console.log(`Bulk write successful for ${bulkOps.length} players.`);
+            }
+
+            const playerDocs = await Player.find({ apiId: { $in: playerApiIds } });
+            const playerObjectIds = playerDocs.map(p => p._id);
+
+            match.players = playerObjectIds;
+            await match.save();
+
+            // সিঙ্ক হওয়ার পর সরাসরি অবজেক্টগুলোই পাঠাবো
+            return res.status(200).json(playerDocs);
           }
-
-          if (bulkOps.length > 0) {
-            await Player.bulkWrite(bulkOps);
-            console.log(`Bulk write successful for ${bulkOps.length} players.`);
-          }
-
-          const playerDocs = await Player.find({ apiId: { $in: playerApiIds } });
-          const playerObjectIds = playerDocs.map(p => p._id);
-
-          match.players = playerObjectIds;
-          await match.save();
-
-          // সিঙ্ক হওয়ার পর সরাসরি অবজেক্টগুলোই পাঠাবো
-          return res.status(200).json(playerDocs);
         }
+      } finally {
+        syncLocks.delete(match.fixtureId);
       }
     }
 
@@ -293,10 +315,10 @@ export const getPlayersForMatch = async (req, res) => {
   const existingPlayers = await Player.find({ _id: { $in: match.players } });
   res.status(200).json(existingPlayers);
   } catch (error) {
+    if (req.params.matchId && !isNaN(req.params.matchId)) syncLocks.delete(Number(req.params.matchId));
     res.status(500).json({ message: 'Server error fetching players', error: error.message });
   }
 };
-
 // @desc    Sync players for a match from API-Football and save to DB
 // @route   POST /api/players/sync/:matchId
 // @access  Private

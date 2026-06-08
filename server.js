@@ -24,7 +24,7 @@ import shopRoutes from './routes/shopRoutes.js';
 import adminAppRoutes from './routes/adminAppRoutes.js';
 import appConfigRoutes from './routes/appConfigRoutes.js';
 
-import { fetchAndSaveLiveMatches } from './services/liveMatchService.js';
+import { fetchAndSaveLiveMatches, syncMatchesFromApi } from './services/liveMatchService.js';
 import { startStreamPrefetchLoop } from './services/streamScraperService.js';
 
 
@@ -185,11 +185,21 @@ const MATCH_SYNC_INTERVAL_MS = Number(process.env.MATCH_SYNC_INTERVAL_MS || 1200
 const shouldAutoSyncMatches = process.env.ENABLE_MATCH_SYNC !== 'false' && !!process.env.FOOTBALL_API_KEY;
 
 if (shouldAutoSyncMatches) {
+  // Live score update checks: Every 20 minutes
+  // It only hits the API if there are actually matches active in the DB
   setInterval(() => {
     fetchAndSaveLiveMatches(io);
-  }, MATCH_SYNC_INTERVAL_MS);
+  }, 20 * 60 * 1000); 
 
+  // Full daily schedule sync (Today & Tomorrow): Every 6 hours
+  // Reduces the bulky 2 API calls to just 4 times a day (8 calls total)
+  setInterval(() => {
+    syncMatchesFromApi(io);
+  }, 6 * 60 * 60 * 1000);
+
+  // Initial fetch on server start
   fetchAndSaveLiveMatches(io);
+  syncMatchesFromApi(io);
 } else {
   console.log('Match auto-sync disabled. Set FOOTBALL_API_KEY and keep ENABLE_MATCH_SYNC not false to enable it.');
 }

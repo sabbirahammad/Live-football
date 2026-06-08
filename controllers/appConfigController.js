@@ -23,16 +23,18 @@ export const getUpdateInfo = async (req, res) => {
 // @route   PUT /api/app-config/update
 export const updateAppConfig = async (req, res) => {
   try {
-    const { latestVersion, updateUrl, forceUpdate, updateMessage } = req.body;
+    const { latestVersion, updateUrl, forceUpdate, updateMessage, globalStreamLinks, fallbackAutoLink } = req.body;
     let config = await AppConfig.findOne();
     if (config) {
-      config.latestVersion = latestVersion || config.latestVersion;
-      config.updateUrl = updateUrl || config.updateUrl;
-      config.forceUpdate = forceUpdate !== undefined ? forceUpdate : config.forceUpdate;
-      config.updateMessage = updateMessage || config.updateMessage;
+      if (latestVersion !== undefined) config.latestVersion = latestVersion;
+      if (updateUrl !== undefined) config.updateUrl = updateUrl;
+      if (forceUpdate !== undefined) config.forceUpdate = forceUpdate;
+      if (updateMessage !== undefined) config.updateMessage = updateMessage;
+      if (globalStreamLinks !== undefined) config.globalStreamLinks = globalStreamLinks;
+      if (fallbackAutoLink !== undefined) config.fallbackAutoLink = fallbackAutoLink;
       await config.save();
     } else {
-      config = await AppConfig.create({ latestVersion, updateUrl, forceUpdate, updateMessage });
+      config = await AppConfig.create({ latestVersion, updateUrl, forceUpdate, updateMessage, globalStreamLinks, fallbackAutoLink });
     }
     res.status(200).json(config);
   } catch (error) {
