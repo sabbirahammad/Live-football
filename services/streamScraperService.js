@@ -82,6 +82,10 @@ const getEffectiveMatchStatus = (match) => {
     return 'Live';
   }
 
+  if (Number.isFinite(kickoffMs) && ageMs > 6 * 60 * 60 * 1000) {
+    return 'Finished';
+  }
+
   return match?.status || 'Upcoming';
 };
 
