@@ -7,6 +7,7 @@ import {
   claimTaskReward,
   getShopOverview,
   updateProfilePicture,
+  updateUserProfile,
   exchangeShopJersey,
   createShopPurchaseRequest,
   deleteUserProfile,
@@ -25,6 +26,7 @@ router.get('/profile/dashboard', protect, getUserProfileDashboard);
 router.post('/tasks/claim', protect, claimTaskReward);
 router.get('/shop', protect, getShopOverview);
 router.get('/profile', protect, getUserProfile);
+router.put('/profile', protect, updateUserProfile);
 router.put('/profile-picture', protect, updateProfilePicture);
 router.delete('/profile', protect, deleteUserProfile);
 router.post('/shop/exchange-jersey', protect, exchangeShopJersey);
