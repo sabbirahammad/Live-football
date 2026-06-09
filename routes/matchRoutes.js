@@ -9,7 +9,7 @@ router.get('/proxy/:resource', proxyFootballData);
 router.post('/simulate', simulateLiveEvent);
 router.post('/sync', syncMatches);
 router.post('/cleanup', manualCleanup);
-router.put('/featured/:id', protect, admin, setFeaturedMatch);
+router.put('/featured/:id', setFeaturedMatch);
 
 // Manual League Allowance Routes
 router.get('/allowed-leagues', getAllowedLeagues);
