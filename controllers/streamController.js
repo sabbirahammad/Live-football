@@ -267,7 +267,18 @@ export const refreshMatchStreams = async (req, res) => {
     // লজিক ফিক্স: স্ক্র্যাপার হেলদি থাকলে সবসময় রিফ্রেশ করবে
     if (health.ok) {
       await clearLiveStreamCache(match.fixtureId || match._id);
-      result = await getLiveStreamsForMatch(match, { forceRefresh: true });
+      
+      const scraperPromise = getLiveStreamsForMatch(match, { forceRefresh: true });
+      const timeoutPromise = new Promise(resolve => setTimeout(() => resolve('TIMEOUT'), 500));
+      
+      const scraperResult = await Promise.race([scraperPromise, timeoutPromise]);
+      
+      if (scraperResult !== 'TIMEOUT') {
+        result = scraperResult;
+      } else {
+        scraperPromise.catch(err => console.error('[Scraper] Background refresh failed:', err.message));
+        result.message = 'Live stream refresh started in background.';
+      }
     }
     
     const finalStreams = [...formattedManualStreams, ...globalStreams, ...(result.streams || [])];

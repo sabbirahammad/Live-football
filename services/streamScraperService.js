@@ -774,11 +774,45 @@ export const clearLiveStreamCache = (fixtureId) => {
   return StreamCache.deleteOne({ fixtureKey });
 };
 
+let isHealthCheckInFlight = false;
+
 export const getStreamScraperHealth = async () => {
-  if (cachedHealthSnapshot && (Date.now() - cachedHealthAt) < HEALTH_CACHE_TTL_MS) {
+  // Stale-while-revalidate pattern for health check
+  const now = Date.now();
+  
+  // Trigger background check if cache is old or missing
+  if (!isHealthCheckInFlight && (!cachedHealthSnapshot || (now - cachedHealthAt) > HEALTH_CACHE_TTL_MS)) {
+    isHealthCheckInFlight = true;
+    doHealthCheck().then(result => {
+      cachedHealthSnapshot = result;
+      cachedHealthAt = Date.now();
+      isHealthCheckInFlight = false;
+    }).catch(err => {
+      console.error('[HealthCheck] Background check failed:', err);
+      isHealthCheckInFlight = false;
+    });
+  }
+
+  // Return cached immediately if we have it
+  if (cachedHealthSnapshot) {
     return cachedHealthSnapshot;
   }
 
+  // If first time ever (no cache), optimistically return OK so we don't block the user
+  // The background task will update the real status shortly
+  return {
+    ok: true,
+    source: 'iptv-scraper',
+    scraperAccessible: true,
+    pythonCommand: 'optimistic',
+    pythonVersion: 'optimistic',
+    dependenciesInstalled: true,
+    cliRunnable: true,
+    checks: [{ check: 'optimistic', ok: true, message: 'Optimistic initial response' }]
+  };
+};
+
+const doHealthCheck = async () => {
   const candidates = getPythonCandidates();
   let pythonCommand = null;
   let pythonVersion = null;
