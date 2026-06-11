@@ -23,8 +23,38 @@ const resolveMatchFromParam = async (matchId) => {
   return match;
 };
 
-// Helper to quickly check if a stream link is alive
+// Memory cache for stream health to prevent slow API response
+const streamHealthCache = new Map();
+
+// Helper to quickly check if a stream link is alive, using stale-while-revalidate strategy
 const checkStreamAlive = async (url) => {
+  const now = Date.now();
+  const cached = streamHealthCache.get(url);
+  
+  if (cached) {
+    // Return cached value if it's less than 1 minute old
+    if (now - cached.timestamp < 60 * 1000) {
+      return cached.isAlive;
+    }
+    // If older than 1 min but less than 10 mins, return stale value and update in background
+    if (now - cached.timestamp < 10 * 60 * 1000) {
+      if (!cached.isChecking) {
+        cached.isChecking = true;
+        doCheckStreamAlive(url).then(isAlive => {
+          streamHealthCache.set(url, { isAlive, timestamp: Date.now(), isChecking: false });
+        });
+      }
+      return cached.isAlive;
+    }
+  }
+
+  // First time check or cache expired (> 10 mins)
+  const isAlive = await doCheckStreamAlive(url);
+  streamHealthCache.set(url, { isAlive, timestamp: Date.now(), isChecking: false });
+  return isAlive;
+};
+
+const doCheckStreamAlive = async (url) => {
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 4000);
