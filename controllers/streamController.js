@@ -149,7 +149,21 @@ export const getMatchStreams = async (req, res) => {
 
     // Scraper healthy থাকলে সবসময় কল করা উচিত যাতে অ্যাডমিন লিঙ্কের পাশাপাশি অটো লিঙ্কও পাওয়া যায়
     if (health.ok) {
-      result = await getLiveStreamsForMatch(match);
+      // Async trigger: don't wait for the python scraper to finish on the user's request.
+      // If it's cached, getLiveStreamsForMatch returns instantly. If not, it starts the lookup.
+      // We'll await it with a very short timeout so if it's cached we get it, otherwise we move on.
+      const scraperPromise = getLiveStreamsForMatch(match);
+      const timeoutPromise = new Promise(resolve => setTimeout(() => resolve('TIMEOUT'), 500));
+      
+      const scraperResult = await Promise.race([scraperPromise, timeoutPromise]);
+      
+      if (scraperResult !== 'TIMEOUT') {
+        result = scraperResult;
+      } else {
+        // Let it run in the background
+        scraperPromise.catch(err => console.error('[Scraper] Background scrape failed:', err.message));
+        result.message = 'Live stream search started in background.';
+      }
     }
     
     const finalStreams = [...formattedManualStreams, ...globalStreams, ...(result.streams || [])];
