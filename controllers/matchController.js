@@ -110,9 +110,21 @@ const processMatchStatistics = async (matchId, fixtureId) => {
           if (minutes > 0 && minutes < 60) { extraPoints += 1; bps += 3; }
           else if (minutes >= 60) { extraPoints += 2; bps += 6; }
 
-          // BPS: Goals & Assists
-          if (goals > 0) bps += (goals * (pos === "Attacker" ? 24 : pos === "Midfielder" ? 18 : 12));
-          if (assists > 0) bps += (assists * 9);
+          // Goals (Full Points + BPS)
+          if (goals > 0) {
+            let goalPts = 4; // Forward
+            if (pos === "Midfielder") goalPts = 5;
+            else if (pos === "Defender" || pos === "Goalkeeper") goalPts = 6;
+            
+            extraPoints += (goals * goalPts);
+            bps += (goals * (pos === "Attacker" ? 24 : pos === "Midfielder" ? 18 : 12));
+          }
+
+          // Assists (Full Points + BPS)
+          if (assists > 0) {
+            extraPoints += (assists * 3);
+            bps += (assists * 9);
+          }
 
           // ২. ক্লিন শিট এবং গোল হজম (Clean Sheet & Goals Conceded)
           if (pos === "Goalkeeper" || pos === "Defender") {
@@ -129,10 +141,12 @@ const processMatchStatistics = async (matchId, fixtureId) => {
             if (penSaved > 0) { extraPoints += (5 * penSaved); bps += (penSaved * 15); }
           }
 
-          // BPS: Cards Deductions
-          if (yellow > 0) bps -= (yellow * 3);
-          if (red > 0) bps -= (red * 9);
-          if (penMissed > 0) bps -= (penMissed * 6); // Penalty miss major deduction
+          // Cards Deductions (Full Points + BPS)
+          if (yellow > 0) { extraPoints -= (yellow * 2); bps -= (yellow * 3); }
+          if (red > 0) { extraPoints -= (red * 5); bps -= (red * 9); }
+          if (penMissed > 0) { extraPoints -= (penMissed * 3); bps -= (penMissed * 6); }
+
+          // Own Goals (API gives it indirectly sometimes, but not standard in basic stats, skipped)
 
           // BPS: Advanced Stats (Modern Fantasy Standard)
           if (passAccuracy >= 80) bps += 2;
@@ -157,7 +171,7 @@ const processMatchStatistics = async (matchId, fixtureId) => {
       // ডাটাবেসে প্লেয়ারের পয়েন্ট আপডেট করা
       for (const mp of matchPlayers) {
         if (mp.extraPoints !== 0) {
-          const playerDoc = await Player.findOneAndUpdate({ apiId: mp.apiId }, { $inc: { pts: mp.extraPoints } });
+          const playerDoc = await Player.findOneAndUpdate({ apiId: mp.apiId }, { $set: { pts: mp.extraPoints } });
           
           // এই ম্যাচের টিমেও পয়েন্টগুলো যোগ করা (যাতে টিমের টোটাল পয়েন্ট ঠিক থাকে)
           if (playerDoc) {
@@ -166,8 +180,8 @@ const processMatchStatistics = async (matchId, fixtureId) => {
               if (!(team.playerPoints instanceof Map)) {
                 team.playerPoints = new Map(Object.entries(team.playerPoints || {}));
               }
-              const currentMatchPts = Number(team.playerPoints.get(playerDoc._id.toString()) || 0);
-              team.playerPoints.set(playerDoc._id.toString(), currentMatchPts + mp.extraPoints);
+              // Set the exact points for the player in this match
+              team.playerPoints.set(playerDoc._id.toString(), mp.extraPoints);
               team.markModified('playerPoints');
               await team.save();
             }
